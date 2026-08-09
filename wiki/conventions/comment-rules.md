@@ -3,7 +3,7 @@ title: 주석 규칙 (백엔드/프론트엔드)
 category: conventions
 tags: [backend, frontend, comment]
 created: 2026-08-06
-updated: 2026-08-06
+updated: 2026-08-09
 ---
 
 # 주석 규칙
@@ -67,10 +67,33 @@ updated: 2026-08-06
 - `응답 JSON`은 실제 필드명과 타입을 알 수 있는 예시 값으로 적는다 (타입 정의만 보고는 실제 모양이 바로 안 그려지는 걸 보완).
 - `client.ts`, `admin/index.ts`, `common/index.ts`, `manage/index.ts` 같은 barrel/유틸 파일은 대상이 아님.
 
+### MyBatis Mapper XML: 쿼리 이름표
+
+`resources/com/exam/**/mapper/*.xml`의 각 `<select>`/`<insert>`/`<update>`/`<delete>` 바로 위에 아래 형식의 이름표를 단다 (실제 예: `UserMapper.xml`).
+
+```xml
+<!--
+     이름            :  findByEmail
+     기능            :  이메일 중복 체크 — OAuthServiceImpl에서 기존 로컬/타 provider 계정과 이메일 충돌 확인용
+     resultType     :  UserDTO
+     parameterType  :  String
+-->
+<select id="findByEmail" resultType="UserDTO" parameterType="String">
+```
+
+- `이름`은 태그의 `id`와 동일하게 적는다(태그 attribute와 다르면 안 됨 — 예전에 `findByID`처럼 오타로 어긋난 적 있었음, 고칠 때마다 같이 맞출 것).
+- `resultType`/`parameterType`은 **태그에 실제로 있는 속성만** 적는다. 없는 속성(예: `update`인데 `resultType`이 없는 경우)은 그 줄 자체를 뺀다 — 없는 값을 억지로 채우지 않는다.
+- `기능`이 이 규칙의 핵심이다. **id/resultType/parameterType은 바로 아래 태그를 보면 이미 다 보이는 정보라 그대로 다시 타이핑하면 정보량이 0**이다. 대신 코드만 봐선 안 보이는 것 — 어느 Service/Controller가 어떤 흐름에서 이 쿼리를 호출하는지, 보안/데이터상 주의할 점(예: `pwd` 해시가 그대로 반환된다는 것과 호출부가 반드시 지워야 한다는 것) — 을 짧게 담는다.
+- 파일 안의 SQL 하나에만 달아놓으면 왜 여기만 있나 헷갈리므로, **한 파일에 붙이면 그 파일의 모든 쿼리에 다 붙인다** (일부만 붙여놓는 건 스캔 용도를 오히려 해침).
+- ⚠️ **대시(`-`)로 테두리를 꾸미면 안 됨**: `<!----------- ... ----------->` 처럼 하이픈을 2개 이상 연속으로 넣으면 XML 주석 스펙 위반(`--`는 주석 내부에 올 수 없음)이라 MyBatis가 파싱 실패로 **앱 기동 자체가 안 됨**. 실제로 8개 Mapper XML에 시도했다가 전부 파싱 에러 나서 되돌린 적 있음 — 구분선이 꼭 필요하면 `=`나 `*`(Java 쪽 `/***...*/`와 통일감 있음) 처럼 XML 주석에서 안전한 문자를 쓸 것.
+
 ## 왜 이렇게 하나
 
-두 규칙 모두 목적이 같다: **레이어를 넘나들 때 코드 추적 비용을 줄이는 것.** 백엔드는 URL/method로 Controller↔Service↔ServiceImpl을 잇고, 프론트는 `백엔드:` 줄로 API 함수↔Controller 메서드를 잇는다. 팀원이 늘어날수록 "이 API가 어디서 처리되는지" 찾는 데 드는 시간이 커지므로, 검색(grep) 한 번으로 대응 지점을 찾을 수 있게 하는 것이 핵심이다.
+세 규칙 모두 목적이 같다: **레이어를 넘나들 때 코드 추적 비용을 줄이는 것.** 백엔드는 URL/method로 Controller↔Service↔ServiceImpl을 잇고, 프론트는 `백엔드:` 줄로 API 함수↔Controller 메서드를 잇고, MyBatis 쿼리 이름표는 `기능` 줄로 Service↔Mapper XML을 잇는다. 팀원이 늘어날수록 "이 API/쿼리가 어디서 처리되는지" 찾는 데 드는 시간이 커지므로, 검색(grep) 한 번으로 대응 지점을 찾을 수 있게 하는 것이 핵심이다.
+
+쿼리 이름표는 처음엔 `id`/`resultType`/`parameterType`을 그대로 다시 타이핑하는 형태로 `UserMapper.xml`에 한 번 시도됐다가(태그 attribute와 어긋나는 오타까지 생김) 방치돼 있던 걸, "`기능` 줄에 코드에 없는 정보만 담기 + 파일 전체에 일관 적용"으로 정정한 것이다.
 
 ## 관련
 - [[api-response-format]]
 - [[api-client-usage]]
+- [[mybatis-conventions]]

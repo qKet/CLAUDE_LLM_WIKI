@@ -20,20 +20,31 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[frontend-folder-structure]] — `lib/api`, `lib/data/types` 구조
 - [[dynamic-menu-system]] — PROGRAMS/ROLE_PROGRAMS 기반 메뉴, 화면 노출 vs API 보안 구분
 - [[db-schema-conventions]] — 감사 컬럼 6종
+- [[terraform-remote-state]] — S3 backend, platform/workload 간 `terraform_remote_state` 참조 구조
+- [[terraform-module-boundaries]] — vpc/subnet/security_group/ec2/eks/rds/redis/storage/ecr 모듈 경계
+- [[terraform-platform-workload-split]] — platform(공유)/workload(workspace) 2-root 구조, env_config 패턴
 
 ## decisions/ — "왜 이렇게 하기로 했나" (ADR)
-- [[README]] — 아직 정식 기록 없음, 템플릿만 있는 상태
+- [[README]] — 사용법/템플릿
+- [[2026-08-06-ci-tool-github-actions]] — CI 도구로 GitHub Actions 선택 (Jenkins 대신)
+- [[2026-08-06-terraform-module-restructure]] — Terraform 모듈 리소스타입별 재편 + platform/workload 2-root화
+- [[2026-08-06-ecr-recreate-vs-import]] — 기존 ECR 저장소 import 대신 삭제 후 재생성
 
 ## troubleshooting/ — 실제 겪은 버그
 - [[null-field-partial-update-bug]] — nullable FK 부분 업데이트 버그 (백/프론트 양쪽)
 - [[utf8mb4-encoding-bug]] — docker exec MySQL 한글 이중 인코딩
+- [[docker-compose-stale-path-bug]] — 저장소 분리 후 docker-compose 볼륨 경로가 안 맞던 문제
+- [[terraform-circular-module-dependency]] — 참고 레포(PAPERPLE-INFRA)의 vpc↔subnet 순환 참조
+- [[github-actions-oidc-not-authorized]] — GitHub Actions OIDC "Not authorized" (근본 원인 미해결, sub+와일드카드로 우회)
 
 ## runbook/ — 반복 운영 절차
 - [[db-schema-change]] — 로컬 DB 스키마 변경 절차 2가지
+- [[terraform-apply-order]] — Terraform 최초 적용 절차 (platform → workload)
 
 ---
 
 ## 고아 페이지 / 미해결 항목
 
-- 로컬 개발 환경 기동 절차([[getting-started]] 참고) — docker-compose 위치 등 아직 미기록
-- [[decisions/README|decisions]] — 실제 ADR 0건, 팀 논의가 있을 때마다 채워야 함
+- CI/CD 나머지 설계(재사용 워크플로우, `qKet/CD` 레포 구조, ArgoCD Application, Terraform `modules/argocd`)는 아직 실제 파일로 안 만들어짐 — [[2026-08-06-ci-tool-github-actions]] 참고
+- [[github-actions-oidc-not-authorized]]의 근본 원인 미해결 — 커스텀 claim(`repository`/`ref`/`job_workflow_ref`)이 왜 안 먹혔는지 원인 규명 못 함 (ID 와일드카드 트레이드오프는 정확한 ID로 교체해서 해소됨)
+- `modules/irsa`, `modules/eks/access.tf`(cluster_admin role), `modules/github-actions-oidc`, ArgoCD helm_release 등 최근 추가된 Terraform 리소스들이 아직 architecture/decisions 문서로 안 남겨짐
