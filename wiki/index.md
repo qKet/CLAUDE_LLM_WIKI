@@ -50,3 +50,4 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[github-actions-oidc-not-authorized]]의 근본 원인 미해결 — 커스텀 claim(`repository`/`ref`/`job_workflow_ref`)이 왜 안 먹혔는지 원인 규명 못 함 (ID 와일드카드 트레이드오프는 정확한 ID로 교체해서 해소됨)
 - `modules/irsa`, `modules/eks/access.tf`(cluster_admin role), `modules/github-actions-oidc`, ArgoCD helm_release 등 최근 추가된 Terraform 리소스들이 아직 architecture/decisions 문서로 안 남겨짐
 - `Infra/kubernetes/{release,prod}/namespace_qKet.yaml`이 `kubernetes_namespace.qket`(platform)과 중복 — 삭제는 보류하기로 함(2026-08-10), ArgoCD "infra-manifests" Application을 실제로 만들 때 다시 정리하기로 함
+- `platform`을 destroy할 때 `helm_release.argocd`/`kubernetes_namespace.qket`가 Access Entry 소실로 `Unauthorized` 나는 문제 — 제안된 해법(별도 root `cluster-bootstrap`으로 분리)이 아직 미구현. [[architecture/terraform-platform-workload-split]], [[troubleshooting/eks-provider-auth]] 참고

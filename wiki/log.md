@@ -167,3 +167,15 @@
 
 - `CLAUDE.md`(위키 운영 규칙)에 "다른 레포와 다른 점" 섹션 신설 + 세션 시작 체크리스트 6번 항목 갱신 — 어느 팀원의 세션이든 git으로 pull 받는 이 파일을 읽으면 동일하게 적용됨
 - (참고) Claude Code의 로컬 메모리 기능에도 이 규칙을 기록해뒀지만, 그건 특정 기기/세션에 종속된 개인 기억이라 팀 전체엔 전파 안 됨 — 팀 규칙의 진짜 소스는 이 `CLAUDE.md`
+
+---
+
+## [2026-08-10] 이채영 | decision | workload의 rds/redis SG가 platform SG를 직접 참조하던 걸 CIDR 참조로 변경
+
+`platform` destroy 중 `DependencyViolation`(bastion SG를 workload의 rds/redis SG가 아직 참조 중이라 삭제 거부)을 겪음. 처음엔 "destroy 순서를 맞추면 되는 문제"로 보였는데, 실제로는 "`workload`(RDS/Redis, 데이터라서 절대 안 지움)가 `platform`(자주 destroy/재생성)의 SG ID를 AWS 레벨에서 직접 참조하고 있다"는 더 근본적인 설계 문제였음 — 순서를 맞춰서 지워도 `platform` 재생성 시 SG ID가 바뀌어서 `workload`를 다시 apply해야 하는 문제가 남기 때문에, "platform만 독립적으로 껐다 켰다" 하려는 목표 자체와 안 맞았음.
+
+`modules/subnet`에 `private_general_subnet_cidrs` output 추가 → `platform`이 이걸 노출 → `workload`의 rds/redis SG ingress가 SG ID 참조(`security_groups`) 대신 이 CIDR(`cidr_blocks`)로 접속을 허용하도록 변경. bastion과 EKS 노드가 같은 서브넷(private_general)에 있어서 규칙 2개(EKS SG 유래, bastion SG 유래)를 CIDR 기준 규칙 1개로 합칠 수 있었음.
+
+- `modules/subnet/outputs.tf`, `platform/outputs.tf`, `workload/main.tf` 수정 (아직 apply 안 함 — 코드만 반영)
+- [[architecture/terraform-platform-workload-split]]에 "workload가 platform의 SG를 참조하면 안 되는 이유" 섹션 신설, 스킴 경로 오타(`Infra/terraform/*`)도 같이 수정
+- ⚠️ 남은 문제: `helm_release.argocd`/`kubernetes_namespace.qket`가 `platform` destroy 시 Access Entry 소실로 Unauthorized 나는 문제는 이것과 별개 원인이라 아직 미해결 — 제안된 해법(별도 root `cluster-bootstrap` 분리)도 미구현. index.md 고아 항목 참고.

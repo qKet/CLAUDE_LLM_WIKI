@@ -3,14 +3,14 @@ title: platform / workload 2-root 구조와 workspace
 category: architecture
 tags: [infra, terraform]
 created: 2026-08-06
-updated: 2026-08-06
+updated: 2026-08-10
 ---
 
 # platform / workload 2-root 구조와 workspace
 
 ## 구조
 
-`Infra/terraform`에는 root가 두 개다:
+`Infra`에는 root가 두 개다:
 
 - **`platform/`** — VPC/서브넷/EKS/bastion/ECR. **공유 싱글턴** — release/prod가 나눠 갖지 않고 딱 하나만 존재. workspace 안 씀, 그냥 한 번 apply.
 - **`workload/`** — RDS/Redis/S3(포스터)/CloudFront/네임스페이스/app-config. **release/prod마다 따로** 존재해야 함 — `terraform workspace`로 분리.
@@ -24,7 +24,7 @@ updated: 2026-08-06
 ## `workload` 안에서 release/prod를 나누는 법: terraform workspace
 
 ```bash
-cd Infra/terraform/workload
+cd Infra/workload
 terraform workspace new release   # 최초 1회
 terraform workspace new prod      # 최초 1회
 terraform workspace select release
@@ -67,7 +67,32 @@ locals {
 
 > 이전엔(재편 전) "prod를 실제로 켤 때는 코드를 직접 고쳐서 안전장치(`skip_final_snapshot=false` 등)를 켤 것"이라는 주석에 의존했었다. 이제는 `terraform workspace select prod`만 하면 이 값들이 **자동으로** 안전한 쪽으로 바뀐다 — 수동으로 빠뜨릴 여지를 없앤 개선.
 
+## `workload`가 `platform`의 SG를 참조하면 안 되는 이유 (2026-08-10)
+
+`platform`은 VPC/EKS/bastion처럼 자주 destroy/재생성하는 대상이고, `workload`(RDS/Redis)는 실제 데이터를 담고 있어 **절대 같이 지워지면 안 되는** 대상이다 — 이 둘의 destroy 주기가 근본적으로 다르다는 게 이 구조의 핵심 전제다.
+
+처음엔 `workload`의 rds/redis 보안그룹 ingress 규칙이 `platform`의 bastion/EKS SG를 **SG ID로 직접 참조**하고 있었다(`security_groups = [data.terraform_remote_state.platform.outputs.bastion_security_group_id]`). 이러면:
+
+1. `platform`을 destroy하려 하면 AWS가 `DependencyViolation`으로 거부한다 — `workload`의 SG 규칙이 아직 그 SG를 참조 중이라서. `workload`는 절대 안 지우는 게 원칙인데, 그럼 `platform`도 영원히 못 지운다는 모순이 생김.
+2. 설령 순서를 억지로 맞춰서 지운다 해도, `platform`을 재생성하면 bastion/EKS SG는 **새 ID**로 다시 생기므로 `workload`가 참조하던 옛 SG ID는 죽은 참조가 되고, `workload`도 다시 apply해야 함 — "platform만 따로 껐다 켰다" 한다는 목표에 어긋남.
+
+**해결**: SG ID 참조 대신 **CIDR 대역**으로 ingress를 검. bastion과 EKS 노드/파드가 모두 `private_general_subnet`에 있으므로, `platform`이 이 서브넷의 CIDR 목록(`private_general_subnet_cidrs`, 서브넷 CIDR은 변수라 재생성해도 안 바뀜)을 output으로 내보내고 `workload`는 그 CIDR로만 ingress를 허용한다.
+
+```hcl
+# workload/main.tf — rds/redis SG
+ingress = [{
+  cidr_blocks     = data.terraform_remote_state.platform.outputs.private_general_subnet_cidrs
+  security_groups = []
+  ...
+}]
+```
+
+트레이드오프: "정확히 이 SG(=이 ENI들)에서 오는 트래픽만"에서 "이 서브넷 대역에서 오는 트래픽"으로 범위가 살짝 넓어짐 — 그래도 여전히 VPC 프라이빗 서브넷 내부로 한정되므로 인터넷 노출 등의 리스크는 없음. 대신 `platform`↔`workload` 사이의 AWS 레벨 하드 의존이 완전히 사라져서, `platform`을 몇 번을 destroy/재생성해도 `workload`가 전혀 영향받지 않게 됨.
+
+> ⚠️ 남은 문제: `platform` 안에 있는 `helm_release.argocd`/`kubernetes_namespace.qket`(kubernetes/helm provider 사용)는 이 CIDR 변경과 별개로, `platform`을 destroy할 때 그 provider가 인증하는 데 쓰는 EKS Access Entry가 먼저 지워지면서 `Unauthorized`가 나는 문제가 남아있음 — [[eks-provider-auth]] 참고. 이건 이 문서(SG 결합 문제)와는 다른 원인이라 별도로 해결해야 함(제안된 해법: 이 두 리소스를 `platform`에서 분리해 별도 root로 빼는 것 — 아직 미구현).
+
 ## 관련
 - [[terraform-module-boundaries]]
 - [[terraform-remote-state]]
 - [[2026-08-06-terraform-module-restructure]]
+- [[../troubleshooting/eks-provider-auth]]
