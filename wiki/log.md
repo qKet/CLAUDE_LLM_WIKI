@@ -315,3 +315,14 @@
 - `backup/README.md`에서 ALB Controller 관련 내용 전부 제거(더 이상 보류 상태 아님), ESO 재활성화 안내만 남김 — ESO는 `04_data`의 RDS/Redis 값을 참조해야 해서 `02_k8s-addon`으로 못 옮기고 여전히 `04_data`에 둬야 한다는 것도 명시
 - index.md/eks-destroy-layer-separation.md의 "Ingress Controller 미설치" 표시를 "완료"로 갱신
 - Infra 레포 커밋은 평소처럼 사용자가 직접 함(git status에서 module rename으로 정상 인식되는 것까지만 확인)
+
+---
+
+## [2026-08-10] 이채영 | ingest | ExternalDNS 신규 추가 (`02_k8s-addon`)
+
+ALB Controller로 ALB는 생기는데 `dev.jun979.click`/`app.jun979.click` 같은 도메인이 Route53에 자동으로 연결되진 않는다는 걸 계기로, ExternalDNS를 새로 추가함. ALB Controller와 완전히 같은 패턴(IRSA Role + `helm_release`)이라 `modules/external-dns`를 새로 만들어서 `02_k8s-addon`에 연결.
+
+- 공유 AWS 계정(다른 팀들 Route53 존도 같은 계정에 있음)이라, `aws route53 list-hosted-zones`로 실제 `jun979.click` 존 ID(`Z0111999JD2RHOSHTM8A`)를 확인해서 `route53:ChangeResourceRecordSets` 권한을 **이 존 하나로만** 좁힘 — `List*` 계열만 Route53 특성상 전체 스코프(`"*"`) 필요(조회만 가능, 변경 불가). Helm 쪽에도 `domainFilters`로 같은 도메인을 한 번 더 걸어서 이중 방어
+- `policy: upsert-only`로 설정 — Ingress가 지워져도 DNS 레코드는 자동으로 안 지움(공유 계정에서 실수 방지 우선, 필요해지면 `sync`로 전환 가능하다고 코드에 남겨둠)
+- `terraform validate` 통과 확인
+- [[troubleshooting/eks-destroy-layer-separation]] "현재 구현 상태"에 추가

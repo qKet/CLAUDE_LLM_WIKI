@@ -97,6 +97,7 @@ Infra/
 - ✅ **`02_k8s-addon` root 신설 완료** — `helm_release.argocd`/`kubernetes_namespace.qket`를 `01_infrastructure`에서 이전함. `01_infrastructure/providers.tf`에서 kubernetes/helm/kubectl provider도 완전히 제거 — 이제 순수 AWS API 리소스만 남음. `terraform validate` 셋 다(`01_infrastructure`/`02_k8s-addon`/`04_data`) 통과 확인
 - ✅ **`03_registry` root 신설 완료** — ECR/github-actions-oidc를 `01_infrastructure`에서 이전함(`01_infrastructure/main.tf`/`outputs.tf`/`variables.tf`에서 관련 코드 완전히 제거 확인). `terraform validate` 통과
 - ✅ **Ingress Controller(AWS Load Balancer Controller) 재활성화 완료** — `backup/modules/alb-controller`를 `modules/alb-controller`로 옮기고 `02_k8s-addon`(01_infrastructure 아님, Layer 2)에 `module.alb_controller`로 연결함. `terraform validate` 통과. 예상대로 이 root(k8s-addon)에 뒀으므로, 나중에 destroy할 때도 EKS가 살아있는 동안 helm uninstall이 정상 동작함(증상 3 예방)
+- ✅ **ExternalDNS 신규 추가** — ALB가 만들어져도 Route53 레코드는 자동으로 안 생기는 문제라, `modules/external-dns` 새로 만들어서 같은 이유(kubernetes/helm provider 사용)로 `02_k8s-addon`에 연결. 공유 AWS 계정이라 `jun979.click` 호스팅존 하나로만 IAM 권한을 좁힘(다른 팀 도메인 실수로 못 건드리게)
 - `argocd/qket-cd-app.yaml`(ArgoCD Application 매니페스트, `qKet/CD` 레포를 `qket-release`로 동기화) 신규 작성됨 — Terraform root는 아니고 `02_k8s-addon`이 설치한 ArgoCD에 등록해서 쓰는 것
 - 다음 실제 apply는 `01_infrastructure` → `02_k8s-addon` → `03_registry`/`04_data`(둘은 순서 무관) 순서로, 전부 빈 state에서 처음 시작하는 것 — 아직 `terraform apply`는 안 함(코드만 준비됨)
 
