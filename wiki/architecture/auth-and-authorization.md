@@ -3,7 +3,7 @@ title: 인증/인가
 category: architecture
 tags: [backend, security]
 created: 2026-08-06
-updated: 2026-08-06
+updated: 2026-08-10
 ---
 
 # 인증/인가
@@ -11,6 +11,8 @@ updated: 2026-08-06
 ## 세션
 
 `HttpSession`(Redis-backed, Spring Session)에 `loginUser`(`UserDTO`) 저장. 각 컨트롤러가 `session.getAttribute("loginUser")`로 꺼내 씀.
+
+> ⚠️ 이 세션이 붙는 ElastiCache Redis 인스턴스를 대기열(`QueueService`)도 같은 노드로 공유하고 있다 — 대기열 폭주 시 세션 조회까지 같이 느려질 수 있는 리스크가 있음. 자세한 내용과 대응 방향은 [[../decisions/2026-08-10-redis-session-queue-shared-instance-risk]] 참고.
 
 ## Role
 
