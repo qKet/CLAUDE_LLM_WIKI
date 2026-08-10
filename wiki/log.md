@@ -243,3 +243,15 @@
 - [[runbook/terraform-apply-order]]를 2-root(infrastructure→data) 절차에서 **3-root(infrastructure→k8s-addon→data)** 절차로 전면 재작성
 - [[architecture/terraform-platform-workload-split]], [[troubleshooting/eks-destroy-layer-separation]], index.md의 "미구현"/"결정만 됨" 표시를 전부 "구현 완료"로 갱신
 - 남은 것: `03_registry`(ECR/github-actions-oidc 분리)는 여전히 미착수, Ingress Controller도 여전히 `backup/`에 보류 중
+
+---
+
+## [2026-08-10] 이채영 | decision | "01_infrastructure를 매일 껐다 켰다" → VPC/서브넷은 안 지우기로, `00_network` root 분리는 보류
+
+`02_k8s-addon` 분리 직후 "04_data를 띄운 채로 01_infrastructure를 destroy해도 안전한가"를 확인하다가, `04_data`(RDS/Redis)가 `01_infrastructure`가 만든 서브넷 안에 물리적으로 떠있어서(SG CIDR 수정과 별개로) `01_infrastructure`를 통째로 destroy하면 여전히 위험하다는 걸 발견. `00_network`(VPC/서브넷을 또 분리하는) root를 제안했으나, 사용자가 "일이 점점 커진다"고 반응 — 재검토한 결과 **VPC/서브넷/라우팅테이블은 떠있어도 과금되지 않는다**는 걸 확인하고, 굳이 새 root로 안 쪼개도 됨을 확인.
+
+- root 추가 없이, `01_infrastructure` 안에서 **비용 나는 리소스만 `-target`으로 골라 지우는** 방식으로 결정 — `module.eks`/`module.ec2`(bastion)/`aws_nat_gateway.this`/`aws_eip.nat`/`module.security_group`만 지우고 VPC/서브넷/라우팅/ECR/OIDC는 그대로 둠
+- `Infra/down.sh`(저녁: k8s-addon 전체 destroy → infrastructure targeted destroy), `Infra/up.sh`(아침: infrastructure apply → k8s-addon apply) 스크립트 작성, 문법 체크 완료(실제 실행은 아직 안 함)
+- [[runbook/daily-infrastructure-toggle]] 신설 — 배경(왜 새 root 대신 이 방식을 택했는지), 순서가 중요한 이유(k8s-addon 먼저 지워야 Unauthorized 안 남), 주의사항
+- index.md 갱신
+- **의사결정 과정 자체를 기록**: 처음엔 "구조적으로 제일 깔끔한" `00_network` 분리를 제안했다가, 사용자의 "계속 나누기만 하면 관리 부담이 커진다"는 현실적 피드백을 받고 더 단순한 대안으로 선회한 것 — 항상 "가장 깔끔한 구조"가 정답은 아니라는 사례로 남겨둠

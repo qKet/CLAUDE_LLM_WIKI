@@ -207,6 +207,7 @@
   },
   "active": "f38aad6efc8508b8",
   "lastOpenFiles": [
+    "wiki/runbook/daily-infrastructure-toggle.md",
     "wiki/troubleshooting/eks-destroy-layer-separation.md",
     "wiki/decisions/2026-08-10-redis-session-queue-shared-instance-risk.md",
     "wiki/troubleshooting/eks-provider-auth.md",
