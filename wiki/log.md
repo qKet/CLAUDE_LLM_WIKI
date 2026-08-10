@@ -265,3 +265,16 @@
 - `Infra/up.sh`, `Infra/down.sh` 삭제
 - `Infra/README.md` 신설 — root 구조 요약, 최초 적용 순서, 매일 아침/저녁 절차(`-chdir` 명령어), 위키 문서 링크 목록까지 포함
 - [[runbook/daily-infrastructure-toggle]]도 스크립트 참조를 명령어 직접 기재로 갱신, 상단에 이 전환 이유를 명시
+
+---
+
+## [2026-08-10] 이채영 | ingest | `03_registry` root — 사용자가 이미 직접 구현해둔 걸 확인 + 문서 반영
+
+`Infra/README.md`에 `03_registry` 최초 적용 순서를 추가하다가, 사용자가 "03 만들어져있을껄?"이라고 해서 확인해보니 실제로 이미 완성돼 있었음(`backend.tf`/`main.tf`/`outputs.tf`/`providers.tf`/`variables.tf` 전부) — `module.ecr`/`module.github_actions_oidc`를 `01_infrastructure`에서 깨끗하게 빼서 옮겨놨고, `01_infrastructure` 쪽에 중복/잔재 없음까지 확인. 덤으로 `Infra/argocd/qket-cd-app.yaml`(ArgoCD Application 매니페스트, `qKet/CD` 레포를 `qket-release`로 동기화)도 새로 생겨있는 걸 발견.
+
+- `terraform validate`로 `03_registry` 정상 통과 확인, `01_infrastructure`도 재검증
+- `Infra/README.md`의 "구상 단계, 아직 없음" 표시를 지우고 실제 apply 명령어로 교체, `argocd/qket-cd-app.yaml`도 설명 추가
+- [[architecture/terraform-module-boundaries]]의 "ECR을 infrastructure에 둔 이유" 섹션을 "ECR을 registry에 둔 이유"로 갱신(제목부터 내용까지 — 더 이상 infrastructure에 없으므로)
+- [[runbook/terraform-apply-order]]를 3-root에서 **4-root**(infrastructure→k8s-addon→registry/data, registry는 순서 무관) 절차로 재작성
+- [[troubleshooting/eks-destroy-layer-separation]], index.md의 "registry 미착수" 표시를 전부 "구현 완료"로 갱신
+- 남은 것: Ingress Controller만 여전히 `backup/`에 보류 중, `argocd/qket-cd-app.yaml`을 실제로 클러스터에 등록하는 것(App-of-Apps 구현)도 아직

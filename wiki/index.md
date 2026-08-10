@@ -42,7 +42,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 
 ## runbook/ — 반복 운영 절차
 - [[db-schema-change]] — 로컬 DB 스키마 변경 절차 2가지
-- [[terraform-apply-order]] — Terraform 최초 적용 절차 (infrastructure → k8s-addon → data, 구 platform → workload)
+- [[terraform-apply-order]] — Terraform 최초 적용 절차 (infrastructure → k8s-addon → registry/data, 구 platform → workload)
 - [[daily-infrastructure-toggle]] — 매일 아침/저녁 `01_infrastructure` 켜고 끄기 (`Infra/README.md`에 명령어 정리, `04_data`는 안 건드림)
 
 ---
@@ -54,5 +54,5 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - `modules/irsa`, `modules/eks/access.tf`(cluster_admin role), `modules/github-actions-oidc`, ArgoCD helm_release 등 최근 추가된 Terraform 리소스들이 아직 architecture/decisions 문서로 안 남겨짐
 - `Infra/kubernetes/{release,prod}/namespace_qKet.yaml`이 `kubernetes_namespace.qket`(infrastructure)과 중복 — 삭제는 보류하기로 함(2026-08-10), ArgoCD "infra-manifests" Application을 실제로 만들 때 다시 정리하기로 함
 - `02_k8s-addon` root 신설 완료(2026-08-10) — namespace/ArgoCD를 `01_infrastructure`에서 분리함. [[troubleshooting/eks-destroy-layer-separation]] 참고
-- `03_registry` root(ECR/github-actions-oidc를 `01_infrastructure`에서 분리) 자체는 아직 안 만들어짐 — 결정은 확정, 구현은 미착수
+- `03_registry` root 신설 완료(2026-08-10) — ECR/github-actions-oidc를 `01_infrastructure`에서 분리함
 - Ingress Controller(ALB Controller 등)가 여전히 `Infra/backup/`에 보류 중 — 재활성화 시 반드시 `02_k8s-addon`(01_infrastructure 아님)에 넣을 것

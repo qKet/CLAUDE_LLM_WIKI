@@ -95,9 +95,10 @@ Infra/
 - ✅ `platform`/`workload` → `01_infrastructure`/`04_data` 디렉토리 rename 완료(git mv, backend key도 갱신)
 - ✅ 기존에 떠있던 AWS 리소스는 전부 destroy 완료 — AWS 계정은 빈 상태였음(마이그레이션 부담 없이 아래 작업 진행)
 - ✅ **`02_k8s-addon` root 신설 완료** — `helm_release.argocd`/`kubernetes_namespace.qket`를 `01_infrastructure`에서 이전함. `01_infrastructure/providers.tf`에서 kubernetes/helm/kubectl provider도 완전히 제거 — 이제 순수 AWS API 리소스만 남음. `terraform validate` 셋 다(`01_infrastructure`/`02_k8s-addon`/`04_data`) 통과 확인
-- ❌ **`03_registry` root는 아직 안 만들어짐** — ECR/github-actions-oidc는 여전히 `01_infrastructure/main.tf`에 같이 있음
+- ✅ **`03_registry` root 신설 완료** — ECR/github-actions-oidc를 `01_infrastructure`에서 이전함(`01_infrastructure/main.tf`/`outputs.tf`/`variables.tf`에서 관련 코드 완전히 제거 확인). `terraform validate` 통과
 - ❌ Ingress Controller는 아직 `Infra/backup/`에 보류 중, 아직 어느 root에도 설치 안 됨
-- 다음 실제 apply는 `01_infrastructure` → `02_k8s-addon` → `04_data` 순서로, 전부 빈 state에서 처음 시작하는 것 — 아직 `terraform apply`는 안 함(코드만 준비됨)
+- `argocd/qket-cd-app.yaml`(ArgoCD Application 매니페스트, `qKet/CD` 레포를 `qket-release`로 동기화) 신규 작성됨 — Terraform root는 아니고 `02_k8s-addon`이 설치한 ArgoCD에 등록해서 쓰는 것
+- 다음 실제 apply는 `01_infrastructure` → `02_k8s-addon` → `03_registry`/`04_data`(둘은 순서 무관) 순서로, 전부 빈 state에서 처음 시작하는 것 — 아직 `terraform apply`는 안 함(코드만 준비됨)
 
 ## 관련
 - [[eks-provider-auth]]
