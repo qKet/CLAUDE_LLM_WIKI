@@ -40,6 +40,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[github-actions-oidc-not-authorized]] — GitHub Actions OIDC "Not authorized" (근본 원인 미해결, sub+와일드카드로 우회)
 - [[eks-provider-auth]] — kubernetes/helm/kubectl provider의 EKS 인증 실패 (토큰 만료 + role-arn 누락)
 - [[eks-destroy-layer-separation]] — EKS destroy 시 K8s addon 정리 실패 종합 정리 + Layer 1(infrastructure)/Layer 2(k8s-addon) 분리 해법 (구현 완료)
+- [[cd-helm-chart-deploy-review]] — CD Helm 차트 실동작 리뷰에서 찾은 문제 4가지(frontend 백엔드 주소 누락, ArgoCD path 오류, frontend Dockerfile 중복 빌드, backend 필수 env var 누락) — OAuth/Toss 시크릿은 실제 발급값 필요해서 미해결
 
 ## runbook/ — 반복 운영 절차
 - [[db-schema-change]] — 로컬 DB 스키마 변경 절차 2가지
@@ -57,3 +58,5 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - `02_k8s-addon` root 신설 완료(2026-08-10) — namespace/ArgoCD를 `01_infrastructure`에서 분리함. [[troubleshooting/eks-destroy-layer-separation]] 참고
 - `03_registry` root 신설 완료(2026-08-10) — ECR/github-actions-oidc를 `01_infrastructure`에서 분리함
 - ESO(External Secrets Operator)만 여전히 `Infra/backup/`에 보류 중 — ALB Controller는 2026-08-10에 `02_k8s-addon`으로 재활성화 완료
+- [[cd-helm-chart-deploy-review]]의 OAuth 3사(Google/Kakao/Naver) client-id/secret + `TOSS_SECRET_KEY`가 CD 차트에 안 연결돼 있음 — 실제 발급값이 준비되면 ESO 패턴으로 새 Secret 추가 필요
+- prod용 ArgoCD Application이 아직 없음 — release용(`Infra/argocd/qket-cd-app.yaml`)만 있고, prod는 `valueFiles: [values.yaml, values-prod.yaml]` 레이어링이 필요함 ([[cd-helm-chart-deploy-review]] 참고)

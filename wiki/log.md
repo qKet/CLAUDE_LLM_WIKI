@@ -326,3 +326,18 @@ ALB Controller로 ALB는 생기는데 `dev.jun979.click`/`app.jun979.click` 같�
 - `policy: upsert-only`로 설정 — Ingress가 지워져도 DNS 레코드는 자동으로 안 지움(공유 계정에서 실수 방지 우선, 필요해지면 `sync`로 전환 가능하다고 코드에 남겨둠)
 - `terraform validate` 통과 확인
 - [[troubleshooting/eks-destroy-layer-separation]] "현재 구현 상태"에 추가
+
+---
+
+## [2026-08-10] 이채영 | troubleshooting | CD Helm 차트 실동작 리뷰 — 문제 4가지 발견/수정
+
+`CD/helm` 쪽이 write-back까지는 잘 되길래 "이대로 배포하면 진짜 돌아갈까?"를 코드 기준으로 직접 리뷰함. CI가 통과하고 이미지가 push되는 것과 별개로 런타임에 깨질 문제 4가지를 찾음:
+
+1. `frontend-deployment.yaml`의 `CLUSTER_IP` env가 통째로 주석 처리 + 변수명도 `BACKEND_URL`로 오기 — API 호출 100% 실패 상황이었음. 주석 해제 + 이름 수정으로 해결
+2. `Infra/argocd/qket-cd-app.yaml`의 `path: release`가 CD 레포 구조 변경(raw manifest → Helm) 후에도 안 고쳐져 있어서 ArgoCD sync가 100% 실패할 상태 — `path: helm`로 수정
+3. `frontend/Dockerfile`이 여전히 3단계 멀티스테이지로 CI가 이미 끝낸 빌드를 중복으로 다시 돌리고 있었음(CI 주석은 "backend와 동일 패턴"이라고 돼 있었는데 실제론 안 맞았음) — backend와 동일한 single-stage로 재작성. 확인차 backend도 같이 점검했는데 backend는 처음부터 정상이었음(`EXPOSE` 포트 표기만 8090→8080으로 정리, 기능적 영향 없음)
+4. backend가 실제로 필요로 하는 env var 전체(`application.yml`의 `${...}`)를 CD 차트의 `configMaps`/`secrets`와 대조 — `APP_BASE_URL`(소셜 로그인 리다이렉트 origin)이 안 채워져 있어서 `ingress.host` 재사용으로 해결(`helm template`로 렌더링 결과 확인). OAuth 3사 client-id/secret 6개 + `TOSS_SECRET_KEY`는 실제 발급받은 값이 없으면 채울 수 없어서 미해결로 남김(값 준비되면 ESO 패턴으로 새 Secret 추가하는 방향 제안)
+
+- [[troubleshooting/cd-helm-chart-deploy-review]] 신설 — 4가지 문제 각각의 증상/원인/해결 + 공통 재발방지("CI 통과 ≠ 배포 시 동작")
+- index.md 갱신 (고아 페이지 섹션에 OAuth/Toss 시크릿 미해결, prod ArgoCD Application 미존재 항목 추가)
+- Infra/CD/backend/frontend 레포 커밋은 평소처럼 사용자가 직접 함

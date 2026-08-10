@@ -207,6 +207,7 @@
   },
   "active": "f38aad6efc8508b8",
   "lastOpenFiles": [
+    "wiki/troubleshooting/cd-helm-chart-deploy-review.md",
     "wiki/decisions/2026-08-10-cd-writeback-github-app.md",
     "wiki/runbook/daily-infrastructure-toggle.md",
     "wiki/troubleshooting/eks-destroy-layer-separation.md",
