@@ -57,7 +57,7 @@ eks_cluster_security_group_id = data.terraform_remote_state.infrastructure.outpu
 
 S3에 있는 `infrastructure/terraform.tfstate`는 infrastructure가 만든 **모든 리소스의 전체 정보**(각 리소스의 모든 attribute)를 담은 큰 JSON이다. 하지만 `terraform_remote_state`로 접근하면 그 전체가 아니라, **infrastructure가 `output "xxx" { value = ... }`으로 명시적으로 내보낸 값들만** `.outputs.xxx`로 읽을 수 있다.
 
-즉 `infrastructure/outputs.tf`가 사실상 **API 계약** 역할을 한다 — infrastructure가 내부 리소스 이름을 리팩터링해도 output 인터페이스만 안 바뀌면 `data`는 영향을 안 받는다.
+즉 `01_infrastructure/outputs.tf`가 사실상 **API 계약** 역할을 한다 — infrastructure가 내부 리소스 이름을 리팩터링해도 output 인터페이스만 안 바뀌면 `data`는 영향을 안 받는다.
 
 > ⚠️ 실제로 겪은 함정: `infrastructure`를 destroy하다가 중간에 멈추면(예: SG DependencyViolation), 이미 지워진 리소스를 참조하는 output이 있을 경우 **state의 output이 통째로 비어버릴 수 있다** — 이러면 `data`가 `terraform_remote_state`를 읽으려 할 때 "object with no attributes"로 실패한다. `terraform apply -refresh-only`로 다시 채워야 함. 자세한 사례는 [[../troubleshooting/eks-destroy-layer-separation]].
 

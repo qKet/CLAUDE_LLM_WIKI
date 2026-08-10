@@ -10,11 +10,11 @@ updated: 2026-08-10
 
 > ⚠️ root 이름이 `platform`→`infrastructure`, `workload`→`data`로 바뀌었고(2026-08-10, 기능 동일), 이 문서가 제안하는 Layer 2 root의 이름도 `cluster-bootstrap`이 아니라 **`k8s-addon`**으로 정했다. 이 문서는 새 이름 기준으로 갱신했다.
 >
-> 이 문서의 "해결"은 **아직 코드로 실제 구현되지 않은, 결정만 된 상태**다. 지금(2026-08-10)도 `infrastructure/main.tf`에 `helm_release.argocd`/`kubernetes_namespace.qket`가 그대로 섞여 있다. "현재 구현 상태" 섹션에 뭐가 됐고 안 됐는지 정확히 남겨둔다.
+> 이 문서의 "해결"은 **아직 코드로 실제 구현되지 않은, 결정만 된 상태**다. 지금(2026-08-10)도 `01_infrastructure/main.tf`에 `helm_release.argocd`/`kubernetes_namespace.qket`가 그대로 섞여 있다. "현재 구현 상태" 섹션에 뭐가 됐고 안 됐는지 정확히 남겨둔다.
 
 ## 배경
 
-`Infra/infrastructure`(구 `platform`; VPC/EKS/bastion/ECR/OIDC + Nginx/ALB 같은 Ingress Controller + ArgoCD + namespace)을 **단일 Terraform state, 단일 apply**로 한 번에 구성했다. 처음 만들 때는(리소스가 늘어나기만 하니까) 문제가 없었는데, `terraform destroy`로 지우려고 하면서부터 매번 다른 형태의 에러가 반복됐다.
+`Infra/01_infrastructure`(구 `platform`; VPC/EKS/bastion/ECR/OIDC + Nginx/ALB 같은 Ingress Controller + ArgoCD + namespace)을 **단일 Terraform state, 단일 apply**로 한 번에 구성했다. 처음 만들 때는(리소스가 늘어나기만 하니까) 문제가 없었는데, `terraform destroy`로 지우려고 하면서부터 매번 다른 형태의 에러가 반복됐다.
 
 ## 증상
 
@@ -38,7 +38,7 @@ resource sg-0534a94c1418e8c06 has a dependent object
 
 **4. (실제로 겪음, 2026-08-10) destroy가 중간에 멈추면 output이 통째로 비어버림**
 
-`infrastructure` destroy가 증상 2(bastion SG DependencyViolation)에서 멈췄을 때, 그 시점에 이미 지워진 리소스(`helm_release.argocd` 등)를 참조하는 output이 있어서 state의 output이 전부 비어버렸다. 그 여파로 `data`가 `terraform_remote_state`로 `infrastructure`의 output을 읽으려다 "object with no attributes"로 실패 — `data`는 이 destroy와 아무 상관이 없었는데도 막힘. `cd infrastructure && terraform apply -refresh-only -auto-approve`로 output을 다시 채워서 해결함.
+`infrastructure` destroy가 증상 2(bastion SG DependencyViolation)에서 멈췄을 때, 그 시점에 이미 지워진 리소스(`helm_release.argocd` 등)를 참조하는 output이 있어서 state의 output이 전부 비어버렸다. 그 여파로 `data`가 `terraform_remote_state`로 `infrastructure`의 output을 읽으려다 "object with no attributes"로 실패 — `data`는 이 destroy와 아무 상관이 없었는데도 막힘. `cd 01_infrastructure && terraform apply -refresh-only -auto-approve`로 output을 다시 채워서 해결함.
 
 ## 원인 (세 갈래로 다른 문제)
 
@@ -63,20 +63,22 @@ resource sg-0534a94c1418e8c06 has a dependent object
 
 ```
 Infra/
-├── infrastructure/     Layer 1 — VPC, EKS(cluster+node group), bastion
+├── 01_infrastructure/   Layer 1 — VPC, EKS(cluster+node group), bastion
 │                        순수 AWS API 리소스만. kubernetes/helm provider 안 씀.
 │                        destroy할 땐 AWS API만 호출하니 순서 꼬임 없이 원샷으로 지워짐.
 │                        매일 수동으로 켜고 끄는 대상.
 │
-├── k8s-addon/           Layer 2 — namespace, ArgoCD, Ingress Controller 등 K8s addon
+├── 02_k8s-addon/        Layer 2 — namespace, ArgoCD, Ingress Controller 등 K8s addon
 │                        terraform_remote_state로 infrastructure의 output(EKS 이름/엔드포인트/
 │                        CA/cluster_admin_role_arn)을 받아서 kubernetes/helm provider로 배포.
 │
-├── data/                RDS/Redis/S3 — infrastructure의 SG를 CIDR로만 참조(SG ID 직접 참조 안 함).
-│                        절대 안 지움.
+├── 03_registry/         ECR, github-actions-oidc — 공유·불변, env 안 나뉨. 절대 안 지움.
 │
-└── registry/            ECR, github-actions-oidc — 공유·불변, env 안 나뉨. 절대 안 지움.
+└── 04_data/             RDS/Redis/S3 — infrastructure의 SG를 CIDR로만 참조(SG ID 직접 참조 안 함).
+                         절대 안 지움.
 ```
+
+숫자 접두사(01~04)는 apply 순서를 그대로 드러내려고 붙임 — Finder/IDE에서 정렬해도 apply해야 하는 순서와 일치한다.
 
 - **apply 순서**: `infrastructure` → `k8s-addon` → `data`/`registry`(둘은 서로 무관, 순서 상관없음)
 - **destroy 순서**: `data`(원칙적으로 안 지움) → `k8s-addon`(EKS가 아직 살아있을 때 K8s addon부터 깨끗하게 정리) → `infrastructure`(이제 아무도 안 걸고 있으니 AWS 리소스만 원샷 삭제). `registry`는 원칙적으로 안 지움.
@@ -92,8 +94,8 @@ Infra/
 - ✅ 증상 2(SG 참조)는 코드 수정 완료 — `data`가 CIDR 기반으로 전환됨
 - ✅ `platform`/`workload` → `infrastructure`/`data` 디렉토리 rename 완료(git mv, backend key도 갱신)
 - ✅ 기존에 떠있던 AWS 리소스는 전부 destroy 완료 — 지금은 **완전히 빈 상태**(아래 참고)
-- ❌ **`k8s-addon` root 자체는 아직 안 만들어짐** — `helm_release.argocd`/`kubernetes_namespace.qket`가 여전히 `infrastructure/main.tf`에 같이 있음
-- ❌ **`registry` root도 아직 안 만들어짐** — ECR/github-actions-oidc는 여전히 `infrastructure/main.tf`에 같이 있음
+- ❌ **`k8s-addon` root 자체는 아직 안 만들어짐** — `helm_release.argocd`/`kubernetes_namespace.qket`가 여전히 `01_infrastructure/main.tf`에 같이 있음
+- ❌ **`registry` root도 아직 안 만들어짐** — ECR/github-actions-oidc는 여전히 `01_infrastructure/main.tf`에 같이 있음
 - ❌ Ingress Controller는 아직 `Infra/backup/`에 보류 중, 아직 어느 root에도 설치 안 됨
 - 다음 apply부터가 새 이름(`infrastructure`/`data`)으로 처음부터 다시 만드는 것 — `k8s-addon`/`registry`를 실제로 만들 좋은 타이밍(빈 상태에서 시작하니 마이그레이션 불필요)
 

@@ -220,3 +220,14 @@
 - `Infra/backup/README.md`, `Infra/backup/platform/`(→`backup/infrastructure/`)도 같이 갱신 — 나중에 ALB Controller/ESO 재활성화할 때 이 문서 보고 따라 하면 새 이름 기준으로 맞게 동작하도록
 - log.md의 과거 항목(위쪽)은 그 시점 실제 이름(`platform`/`workload`)이 맞으므로 안 고침 — CLAUDE.md의 "코드가 우선, 위키를 갱신" 원칙은 현재 상태를 설명하는 문서에 적용하는 것이지 과거 기록을 소급 수정하는 게 아님
 - 결과: AWS 계정에 이 프로젝트 관련 리소스가 하나도 없는 완전히 빈 상태. 다음 apply부터 `infrastructure`/`data`라는 새 이름으로 처음 시작 — `k8s-addon`/`registry` root를 실제로 만들기 좋은 타이밍(마이그레이션 필요 없음)
+
+---
+
+## [2026-08-10] 이채영 | ingest | root 디렉토리에 apply 순서를 드러내는 숫자 접두사 추가
+
+바로 위 항목에서 `infrastructure`/`data`로 이름만 바꿨는데, 사용자가 IDE에서 직접 `01_infrastructure`/`04_data`로 한 번 더 바꿔놓음 — Finder/IDE에서 정렬해도 apply 순서(infrastructure→k8s-addon→registry/data)와 그대로 일치하게 하려는 의도. 확인 결과 번호 체계 확정: `01_infrastructure`, `02_k8s-addon`(미생성), `03_registry`(미생성), `04_data`.
+
+- git이 이 변경을 "예전 이름 삭제 + 새 이름 untracked"로 잘못 보고 있던 걸 `git add -A`로 다시 스테이징해서 rename으로 정상 인식시킴
+- Infra 코드(모듈 주석, backup/README.md)와 위키 문서(관련 파일 전부) 안의 `Infra/infrastructure`, `Infra/data`, `infrastructure/main.tf` 같은 **경로** 참조를 전부 `01_infrastructure`/`04_data` 접두사 붙은 형태로 재수정
+- S3 backend의 state key(`key = "infrastructure/terraform.tfstate"` 등)는 숫자 접두사 없이 그대로 둠 — 로컬 디렉토리 정렬용 접두사와 S3 키 네이밍은 무관하다고 판단
+- `terraform validate`로 `01_infrastructure`/`04_data` 둘 다 정상 통과 재확인

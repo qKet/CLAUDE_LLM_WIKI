@@ -26,7 +26,7 @@ updated: 2026-08-10
 ## `data` 안에서 release/prod를 나누는 법: terraform workspace
 
 ```bash
-cd Infra/data
+cd Infra/04_data
 terraform workspace new release   # 최초 1회
 terraform workspace new prod      # 최초 1회
 terraform workspace select release
@@ -37,7 +37,7 @@ S3 backend + workspace 조합이면 state key가 자동으로 `env:/<workspace>/
 
 ## `default` workspace 실수 방지: `workspace_guard`
 
-`terraform init` 직후엔 항상 `default`라는 workspace에 있다. 여기서 실수로 `apply`하면 안 되므로 `data/main.tf`에 이런 가드를 넣어뒀다:
+`terraform init` 직후엔 항상 `default`라는 workspace에 있다. 여기서 실수로 `apply`하면 안 되므로 `04_data/main.tf`에 이런 가드를 넣어뒀다:
 
 ```hcl
 resource "terraform_data" "workspace_guard" {
@@ -54,7 +54,7 @@ resource "terraform_data" "workspace_guard" {
 
 ## release/prod마다 달라지는 값: `env_config` locals 맵
 
-`db_instance_class`, `multi_az`, `skip_final_snapshot`, `deletion_protection`, `redis_node_type`, `force_destroy` 같은 값들은 release/prod가 달라야 한다. `data/main.tf`의 locals에 workspace-키 맵으로 정의:
+`db_instance_class`, `multi_az`, `skip_final_snapshot`, `deletion_protection`, `redis_node_type`, `force_destroy` 같은 값들은 release/prod가 달라야 한다. `04_data/main.tf`의 locals에 workspace-키 맵으로 정의:
 
 ```hcl
 locals {
@@ -81,7 +81,7 @@ locals {
 **해결**: SG ID 참조 대신 **CIDR 대역**으로 ingress를 검. bastion과 EKS 노드/파드가 모두 `private_general_subnet`에 있으므로, `infrastructure`가 이 서브넷의 CIDR 목록(`private_general_subnet_cidrs`, 서브넷 CIDR은 변수라 재생성해도 안 바뀜)을 output으로 내보내고 `data`는 그 CIDR로만 ingress를 허용한다.
 
 ```hcl
-# data/main.tf — rds/redis SG
+# 04_data/main.tf — rds/redis SG
 ingress = [{
   cidr_blocks     = data.terraform_remote_state.infrastructure.outputs.private_general_subnet_cidrs
   security_groups = []

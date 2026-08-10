@@ -8,13 +8,13 @@ updated: 2026-08-10
 
 # Terraform 최초 적용 절차 (infrastructure → data)
 
-> ⚠️ 2026-08-10에 root 이름이 `platform`→`infrastructure`, `workload`→`data`로 바뀌었다(기능 동일, 이름만 변경). 이 문서는 새 이름 기준.
+> ⚠️ 2026-08-10에 root 이름이 `platform`→`infrastructure`, `workload`→`data`로 바뀌었고, 곧이어 apply 순서를 그대로 드러내는 **숫자 접두사**가 붙었다: 실제 디렉토리명은 `01_infrastructure`/`04_data`(`02_k8s-addon`/`03_registry`는 구상 단계, 아직 없음). 본문에서는 편의상 접두사 없이 `infrastructure`/`data`로 부르되, 실제 명령어(`cd` 등)는 숫자 접두사를 붙인 진짜 경로로 적는다.
 
 ## 배경
 
 `infrastructure`(VPC/EKS/bastion/ECR)과 `data`(RDS/Redis/storage, release/prod)가 별도 root라서 순서를 지켜야 한다 — `data`가 `infrastructure`의 output을 [[terraform-remote-state|원격으로 참조]]하기 때문에, `infrastructure`가 먼저 apply되어 있어야 `data`가 필요한 값을 읽을 수 있다.
 
-`infrastructure`는 `qket-release`/`qket-prod` 네임스페이스도 같이 만든다(`kubernetes_namespace.qket`, `for_each`로 둘 다 한 번에) — `data`의 `kubernetes_config_map`/`module.storage`(ServiceAccount 등)가 그 네임스페이스가 이미 있다고 전제하기 때문에, 순서상 `infrastructure`가 먼저 끝나 있어야 하는 이유가 하나 더 늘었다. (원래는 ArgoCD가 `Infra/kubernetes/*.yaml`로 네임스페이스까지 관리할 계획이었는데, 그 ArgoCD Application이 아직 없어서 새 클러스터마다 `data` apply가 "namespace not found"로 실패하는 걸 겪고 `infrastructure`로 옮김 — 자세한 경위는 `infrastructure/main.tf`의 `kubernetes_namespace.qket` 주석, [[../troubleshooting/eks-destroy-layer-separation]] 참고.)
+`infrastructure`는 `qket-release`/`qket-prod` 네임스페이스도 같이 만든다(`kubernetes_namespace.qket`, `for_each`로 둘 다 한 번에) — `data`의 `kubernetes_config_map`/`module.storage`(ServiceAccount 등)가 그 네임스페이스가 이미 있다고 전제하기 때문에, 순서상 `infrastructure`가 먼저 끝나 있어야 하는 이유가 하나 더 늘었다. (원래는 ArgoCD가 `Infra/kubernetes/*.yaml`로 네임스페이스까지 관리할 계획이었는데, 그 ArgoCD Application이 아직 없어서 새 클러스터마다 `data` apply가 "namespace not found"로 실패하는 걸 겪고 `infrastructure`로 옮김 — 자세한 경위는 `01_infrastructure/main.tf`의 `kubernetes_namespace.qket` 주석, [[../troubleshooting/eks-destroy-layer-separation]] 참고.)
 
 > ⚠️ 이 `kubernetes_namespace.qket`/`helm_release.argocd`는 원래 계획대로면 `infrastructure`가 아니라 별도 `k8s-addon` root(구상 단계)에 있어야 한다 — 아직 이전 전이라 지금은 `infrastructure`에 같이 있다. [[../troubleshooting/eks-destroy-layer-separation]] 참고.
 
@@ -23,7 +23,7 @@ updated: 2026-08-10
 ### 1. infrastructure 먼저 적용 (한 번만, workspace 없음)
 
 ```bash
-cd Infra/infrastructure
+cd Infra/01_infrastructure
 terraform init
 terraform plan
 terraform apply
@@ -32,7 +32,7 @@ terraform apply
 ### 2. data workspace 생성 (최초 1회)
 
 ```bash
-cd Infra/data
+cd Infra/04_data
 terraform init
 terraform workspace new release
 terraform workspace new prod
