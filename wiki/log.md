@@ -290,3 +290,14 @@
 - `Infra/README.md`, [[runbook/daily-infrastructure-toggle]] 둘 다 아침 절차에 `04_data apply`(release/prod) 3번째 단계로 추가 + "왜 필요한가" 설명 섹션 신설
 - Helm 차트 쪽 체크리스트도 주의사항에 추가: `serviceAccount.create: false` + `qket-backend` 참조 확인
 - index.md 갱신
+
+---
+
+## [2026-08-10] 이채영 | decision | CD 레포 write-back 인증으로 GitHub App 선택 + 실제 구현 완료
+
+`docs/cluadeDocs/ci-cd-cross-repo-auth.md`에 비교만 해두고 미뤄뒀던 PAT vs GitHub App 결정을 실제로 내림. PAT도 레포 하나로 스코프 좁히고 만료 설정하면 기술적으로 크게 위험하진 않다는 것까지 짚었지만, "장기 자격증명을 시크릿에 두기 싫다"는 사용자의 원칙적 이유로 GitHub App 선택 — AWS를 OIDC로 인증하는 것과 같은 맥락. 설정 과정에서 처음엔 개인 계정 소유로 잘못 생성됐다가(조직 설정 화면의 "My GitHub Apps" 링크가 개인 계정 앱 목록으로 연결되는 UI 함정), 삭제하고 `organizations/qKet/settings/apps/new`로 조직 소유 재생성.
+
+- [[decisions/2026-08-10-cd-writeback-github-app]] 신설 — 배경/결정/고려한 대안(PAT)/트레이드오프/시행착오/구현 상세
+- 실제 구현도 완료: `qket-ci-bot` App(qKet 소유, CD 레포에만 설치, Contents R/W만) 생성, `QKET_CI_APP_ID`/`QKET_CI_APP_PRIVATE_KEY` 시크릿을 backend/frontend 양쪽에 등록, `backend`/`frontend`의 `CI-release.yml`에 write-back 스텝(App 토큰 발급 → `qKet/CD` checkout → `values.yaml` image 값 sed 치환 → commit/push) 추가
+- write-back 대상인 `CD/helm/values.yaml` 구조가 작업 도중 바뀌어서(이미지 줄 옆 주석이 없어짐) backend의 sed 패턴이 한 번 깨졌다가, "backend:"/"frontend:" 블록 range 매칭 방식으로 통일해서 재수정 — 실제 파일로 idempotency까지 테스트 완료
+- index.md 갱신

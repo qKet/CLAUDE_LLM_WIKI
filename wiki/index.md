@@ -30,6 +30,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[2026-08-06-terraform-module-restructure]] — Terraform 모듈 리소스타입별 재편 + platform/workload 2-root화
 - [[2026-08-06-ecr-recreate-vs-import]] — 기존 ECR 저장소 import 대신 삭제 후 재생성
 - [[2026-08-10-redis-session-queue-shared-instance-risk]] — 세션/대기열이 같은 Redis 인스턴스 공유 시 리스크(noisy neighbor, 메모리 압박), 페일오버로도 안 풀리는 부분, 물리 분리 vs 논리 DB 분리 비용 비교 (논의중 — 부하테스트 후 재검토)
+- [[2026-08-10-cd-writeback-github-app]] — CD 레포 write-back 인증으로 GitHub App 선택(PAT 대신) — 장기 자격증명을 시크릿에 안 두려는 원칙, 개인 계정으로 잘못 생성됐던 시행착오 포함
 
 ## troubleshooting/ — 실제 겪은 버그
 - [[null-field-partial-update-bug]] — nullable FK 부분 업데이트 버그 (백/프론트 양쪽)
