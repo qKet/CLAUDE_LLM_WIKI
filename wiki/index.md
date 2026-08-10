@@ -20,9 +20,9 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[frontend-folder-structure]] — `lib/api`, `lib/data/types` 구조
 - [[dynamic-menu-system]] — PROGRAMS/ROLE_PROGRAMS 기반 메뉴, 화면 노출 vs API 보안 구분
 - [[db-schema-conventions]] — 감사 컬럼 6종
-- [[terraform-remote-state]] — S3 backend, platform/workload 간 `terraform_remote_state` 참조 구조
+- [[terraform-remote-state]] — S3 backend, infrastructure/data(구 platform/workload) 간 `terraform_remote_state` 참조 구조
 - [[terraform-module-boundaries]] — vpc/subnet/security_group/ec2/eks/rds/redis/storage/ecr 모듈 경계
-- [[terraform-platform-workload-split]] — platform(공유)/workload(workspace) 2-root 구조, env_config 패턴
+- [[terraform-platform-workload-split]] — infrastructure(공유)/data(workspace) 2-root 구조(구 platform/workload), env_config 패턴
 
 ## decisions/ — "왜 이렇게 하기로 했나" (ADR)
 - [[README]] — 사용법/템플릿
@@ -38,11 +38,11 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[terraform-circular-module-dependency]] — 참고 레포(PAPERPLE-INFRA)의 vpc↔subnet 순환 참조
 - [[github-actions-oidc-not-authorized]] — GitHub Actions OIDC "Not authorized" (근본 원인 미해결, sub+와일드카드로 우회)
 - [[eks-provider-auth]] — kubernetes/helm/kubectl provider의 EKS 인증 실패 (토큰 만료 + role-arn 누락)
-- [[eks-destroy-layer-separation]] — EKS destroy 시 K8s addon 정리 실패 종합 정리 + Layer 1(platform)/Layer 2(cluster-bootstrap) 분리 해법 (결정만 됨, 미구현)
+- [[eks-destroy-layer-separation]] — EKS destroy 시 K8s addon 정리 실패 종합 정리 + Layer 1(infrastructure)/Layer 2(k8s-addon) 분리 해법 (결정만 됨, 미구현)
 
 ## runbook/ — 반복 운영 절차
 - [[db-schema-change]] — 로컬 DB 스키마 변경 절차 2가지
-- [[terraform-apply-order]] — Terraform 최초 적용 절차 (platform → workload)
+- [[terraform-apply-order]] — Terraform 최초 적용 절차 (infrastructure → data, 구 platform → workload)
 
 ---
 
@@ -51,6 +51,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - CI/CD 나머지 설계(재사용 워크플로우, `qKet/CD` 레포 구조, ArgoCD Application, Terraform `modules/argocd`)는 아직 실제 파일로 안 만들어짐 — [[2026-08-06-ci-tool-github-actions]] 참고
 - [[github-actions-oidc-not-authorized]]의 근본 원인 미해결 — 커스텀 claim(`repository`/`ref`/`job_workflow_ref`)이 왜 안 먹혔는지 원인 규명 못 함 (ID 와일드카드 트레이드오프는 정확한 ID로 교체해서 해소됨)
 - `modules/irsa`, `modules/eks/access.tf`(cluster_admin role), `modules/github-actions-oidc`, ArgoCD helm_release 등 최근 추가된 Terraform 리소스들이 아직 architecture/decisions 문서로 안 남겨짐
-- `Infra/kubernetes/{release,prod}/namespace_qKet.yaml`이 `kubernetes_namespace.qket`(platform)과 중복 — 삭제는 보류하기로 함(2026-08-10), ArgoCD "infra-manifests" Application을 실제로 만들 때 다시 정리하기로 함
-- `cluster-bootstrap` root(namespace/ArgoCD/Ingress Controller 등 K8s addon을 `platform`에서 분리) 자체가 아직 안 만들어짐 — 결정은 확정, 구현은 미착수. [[troubleshooting/eks-destroy-layer-separation]] 참고
-- Ingress Controller(ALB Controller 등)가 여전히 `Infra/backup/`에 보류 중 — 재활성화 시 반드시 `cluster-bootstrap`(platform 아님)에 넣을 것
+- `Infra/kubernetes/{release,prod}/namespace_qKet.yaml`이 `kubernetes_namespace.qket`(infrastructure)과 중복 — 삭제는 보류하기로 함(2026-08-10), ArgoCD "infra-manifests" Application을 실제로 만들 때 다시 정리하기로 함
+- `k8s-addon` root(namespace/ArgoCD/Ingress Controller 등 K8s addon을 `infrastructure`에서 분리, 구 `cluster-bootstrap`) 자체가 아직 안 만들어짐 — 결정은 확정, 구현은 미착수. [[troubleshooting/eks-destroy-layer-separation]] 참고
+- `registry` root(ECR/github-actions-oidc를 `infrastructure`에서 분리) 자체도 아직 안 만들어짐 — 결정은 확정, 구현은 미착수
+- Ingress Controller(ALB Controller 등)가 여전히 `Infra/backup/`에 보류 중 — 재활성화 시 반드시 `k8s-addon`(infrastructure 아님)에 넣을 것

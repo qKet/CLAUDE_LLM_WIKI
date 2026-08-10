@@ -204,3 +204,19 @@
 - [[troubleshooting/eks-destroy-layer-separation]] 신설 — 증상 3개(1·2는 실제로 겪음, 3번 Ingress Controller의 ALB/ENI 잔존 문제는 아직 안 겪었지만 같은 계열이라 미리 남김), 원인 표, Layer 분리 해법, **"현재 구현 상태" 섹션에 뭐가 코드로 됐고(SG CIDR 전환) 뭐가 아직 결정만 됐는지(cluster-bootstrap root 자체) 정직하게 구분**
 - index.md 갱신 — 고아 항목을 이 문서 하나로 통합해서 가리키게 정리, Ingress Controller 재활성화 시 주의사항 추가
 - 아직 미해결: `cluster-bootstrap` root 실제 생성, `registry` root 실제 생성, `workload`에 `prevent_destroy` 추가 — 전부 다음 작업으로 남음
+
+---
+
+## [2026-08-10] 이채영 | restructure | AWS 인프라 전체 destroy + root 디렉토리 이름 변경 (platform→infrastructure, workload→data)
+
+정리하다 막힌 김에 사용자 결정으로 기존 AWS 인프라를 전부 지우고 새 구조로 다시 시작하기로 함. 실제로 진행한 것:
+
+1. `data`(당시 workload) release workspace destroy — RDS/Redis/S3/CloudFront/IAM/SG 등 14개 리소스, 도중에 `module.storage`가 이미 null이 된 `infrastructure`의 OIDC provider 출력값 때문에 `replace()` 에러가 나서 destroy 전용 더미값으로 임시 우회 후 완료, 끝나고 원복
+2. `infrastructure`(당시 platform) destroy 마무리 — 이전에 bastion SG DependencyViolation으로 멈춰있던 것을, `data`를 먼저 지운 뒤 재시도해서 완료(EKS 클러스터+VPC+서브넷 등 12개 리소스)
+3. 이 과정에서 [[troubleshooting/eks-destroy-layer-separation]]에 증상 4(destroy 중단 시 output이 통째로 비어서 다른 root까지 막히는 문제)로 추가 기록
+4. 사용자 요청으로 **root 디렉토리 이름을 전부 영어로 재정리**: `platform` → `infrastructure`, `workload` → `data`(구상 중이던 `cluster-bootstrap`/`registry`는 각각 `k8s-addon`/`registry`로 명명 확정, 아직 미생성). `git mv`로 이력 보존, backend.tf의 S3 key도 새 이름으로 갱신(state가 비어있던 시점이라 마이그레이션 없이 그냥 새 key로 재-init), `data.terraform_remote_state.platform` 참조도 전부 `infrastructure`로 리네임, `terraform validate` 둘 다 통과 확인
+
+- [[architecture/terraform-platform-workload-split]], [[architecture/terraform-remote-state]], [[architecture/terraform-module-boundaries]], [[runbook/terraform-apply-order]], [[troubleshooting/eks-destroy-layer-separation]] 전부 새 이름 기준으로 갱신 — 파일명 자체는 안 바꿈(백링크가 많아서), 대신 각 문서 상단에 "이름이 바뀌었다"는 안내 블록 추가
+- `Infra/backup/README.md`, `Infra/backup/platform/`(→`backup/infrastructure/`)도 같이 갱신 — 나중에 ALB Controller/ESO 재활성화할 때 이 문서 보고 따라 하면 새 이름 기준으로 맞게 동작하도록
+- log.md의 과거 항목(위쪽)은 그 시점 실제 이름(`platform`/`workload`)이 맞으므로 안 고침 — CLAUDE.md의 "코드가 우선, 위키를 갱신" 원칙은 현재 상태를 설명하는 문서에 적용하는 것이지 과거 기록을 소급 수정하는 게 아님
+- 결과: AWS 계정에 이 프로젝트 관련 리소스가 하나도 없는 완전히 빈 상태. 다음 apply부터 `infrastructure`/`data`라는 새 이름으로 처음 시작 — `k8s-addon`/`registry` root를 실제로 만들기 좋은 타이밍(마이그레이션 필요 없음)

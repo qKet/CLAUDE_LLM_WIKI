@@ -8,7 +8,7 @@ updated: 2026-08-10
 
 # kubernetes/helm/kubectl provider가 EKS에 인증 못 하던 문제
 
-`Infra/platform/providers.tf`의 kubernetes/helm/kubectl provider 설정에서 실제로 겪은 두 가지 문제. 지금은 둘 다 해결돼서 코드에 반영돼 있지만, 왜 지금 형태(exec 방식 + `--role-arn` 명시)인지가 코드 주석에만 짧게 남아있어서 별도 페이지로 정리.
+`Infra/infrastructure/providers.tf`의 kubernetes/helm/kubectl provider 설정에서 실제로 겪은 두 가지 문제. 지금은 둘 다 해결돼서 코드에 반영돼 있지만, 왜 지금 형태(exec 방식 + `--role-arn` 명시)인지가 코드 주석에만 짧게 남아있어서 별도 페이지로 정리.
 
 ## 증상 1: apply가 오래 걸리면 뒷부분에서 인증 실패
 
@@ -26,7 +26,7 @@ updated: 2026-08-10
 
 ## 해결
 
-두 문제 다 `Infra/platform/providers.tf`에서 한 번에 해결됨:
+두 문제 다 `Infra/infrastructure/providers.tf`에서 한 번에 해결됨:
 
 ```hcl
 provider "kubernetes" {
