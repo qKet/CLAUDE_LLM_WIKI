@@ -301,3 +301,17 @@
 - 실제 구현도 완료: `qket-ci-bot` App(qKet 소유, CD 레포에만 설치, Contents R/W만) 생성, `QKET_CI_APP_ID`/`QKET_CI_APP_PRIVATE_KEY` 시크릿을 backend/frontend 양쪽에 등록, `backend`/`frontend`의 `CI-release.yml`에 write-back 스텝(App 토큰 발급 → `qKet/CD` checkout → `values.yaml` image 값 sed 치환 → commit/push) 추가
 - write-back 대상인 `CD/helm/values.yaml` 구조가 작업 도중 바뀌어서(이미지 줄 옆 주석이 없어짐) backend의 sed 패턴이 한 번 깨졌다가, "backend:"/"frontend:" 블록 range 매칭 방식으로 통일해서 재수정 — 실제 파일로 idempotency까지 테스트 완료
 - index.md 갱신
+
+---
+
+## [2026-08-10] 이채영 | restructure | ALB Controller(AWS Load Balancer Controller) `02_k8s-addon`으로 재활성화
+
+`CD` 레포의 Helm 차트가 Ingress를 만들어도 실제 ALB가 안 생기는 문제(Ingress Controller 자체가 없어서) — `backup/modules/alb-controller`에 보류돼 있던 걸 실제로 재활성화. [[troubleshooting/eks-destroy-layer-separation]]에서 이미 결정해둔 대로 `01_infrastructure`가 아니라 `02_k8s-addon`(Layer 2, K8s addon 전용)에 연결함.
+
+- `git mv backup/modules/alb-controller modules/alb-controller`
+- `02_k8s-addon`에 `module.alb_controller` 추가 — `01_infrastructure`의 remote_state(vpc_id, eks_cluster_name, oidc_provider_*)를 참조. `aws`/`http` provider가 이 root에 처음 필요해져서 `providers.tf`에 추가(기존엔 kubernetes/helm만 있었음), `project_name` 변수도 추가
+- `01_infrastructure/outputs.tf`의 stale한 주석 처리된 `alb_controller_role_arn` output 삭제(이제 `02_k8s-addon/outputs.tf`에 있음), `backup/infrastructure/alb-controller.tf`(구 구조 참조하던 죽은 코드)도 삭제
+- `terraform init`/`fmt`/`validate`로 `02_k8s-addon`/`01_infrastructure` 둘 다 정상 확인
+- `backup/README.md`에서 ALB Controller 관련 내용 전부 제거(더 이상 보류 상태 아님), ESO 재활성화 안내만 남김 — ESO는 `04_data`의 RDS/Redis 값을 참조해야 해서 `02_k8s-addon`으로 못 옮기고 여전히 `04_data`에 둬야 한다는 것도 명시
+- index.md/eks-destroy-layer-separation.md의 "Ingress Controller 미설치" 표시를 "완료"로 갱신
+- Infra 레포 커밋은 평소처럼 사용자가 직접 함(git status에서 module rename으로 정상 인식되는 것까지만 확인)
