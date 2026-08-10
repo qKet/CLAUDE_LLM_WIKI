@@ -134,3 +134,16 @@
 
 - [[conventions/comment-rules]]의 MyBatis 섹션에 ⚠️ 경고 추가 — 대시 테두리 금지, 필요하면 `=`나 `*` 사용할 것
 - 최종 형식은 findById에 사용자가 직접 되돌려놓은 심플한 `<!-- 이름 : ... -->` 블록 형식으로 확정
+
+---
+
+## [2026-08-10] MoonJunH | decision | 세션-대기열 Redis 인스턴스 공유 리스크 검토 및 페일오버 계획 확정
+
+세션(Spring Session)과 대기열(`QueueService`)이 같은 ElastiCache Redis 인스턴스(`cache.t3.micro`, 싱글 노드)를 공유하는 현재 구조에서, 대기열 폭주 시 문제없을지 검토 요청을 받고 분석. 프론트 `QueueModal.tsx`의 3초 폴링 + `getStatus()`마다 `admitAvailableUsers()`가 같이 도는 구조를 근거로, 오픈런 시나리오(대기자 5,000명 기준 초당 약 8,000개 Redis 커맨드)에서 noisy neighbor(세션 응답 지연)와 메모리 압박(세션 eviction) 리스크가 실재함을 확인.
+
+- 오토 페일오버는 운영(prod) 전환 시점에 켜기로 확정 (지금은 예산상 보류) — 다만 페일오버는 "장애 전파" 리스크만 해소하고 noisy neighbor·메모리 압박은 그대로 남는다는 점을 명확히 함
+- 세션/대기열 물리 분리는 아직 미확정 — 부하테스트로 `t3.micro` 싱글 노드의 실제 임계치를 실측한 뒤 재검토하기로 함
+- "분리하면 더 싸진다"는 오해를 정정 — 분리는 절감이 아니라 순수 추가 비용(노드 수 최대 4배)
+- 논리 DB 분리(`SELECT`)는 비용 0원이지만 CPU/메모리 격리는 안 되는 임시방편으로 대안에만 기록
+- [[decisions/2026-08-10-redis-session-queue-shared-instance-risk]] 신설 (배경/결정/고려한 대안/트레이드오프)
+- [[architecture/auth-and-authorization]]에 상호 링크 추가
