@@ -10,7 +10,7 @@ updated: 2026-08-10
 
 > ⚠️ root 이름이 `platform`→`infrastructure`, `workload`→`data`로 바뀌었고(2026-08-10, 기능 동일), 이 문서가 제안하는 Layer 2 root의 이름도 `cluster-bootstrap`이 아니라 **`k8s-addon`**으로 정했다. 이 문서는 새 이름 기준으로 갱신했다.
 >
-> 이 문서의 "해결"은 **아직 코드로 실제 구현되지 않은, 결정만 된 상태**다. 지금(2026-08-10)도 `01_infrastructure/main.tf`에 `helm_release.argocd`/`kubernetes_namespace.qket`가 그대로 섞여 있다. "현재 구현 상태" 섹션에 뭐가 됐고 안 됐는지 정확히 남겨둔다.
+> ✅ 2026-08-10: 이 문서의 "해결"(Layer 분리)이 실제로 구현됐다 — `helm_release.argocd`/`kubernetes_namespace.qket`가 `02_k8s-addon`으로 이전 완료. "현재 구현 상태" 섹션 참고.
 
 ## 배경
 
@@ -90,14 +90,14 @@ Infra/
 
 ## 현재 구현 상태 (2026-08-10 기준, 정직하게)
 
-- ✅ **결정은 확정**: 이 문서의 Layer 1/Layer 2 분리 채택, root 이름을 `infrastructure`/`k8s-addon`/`data`/`registry`로 확정
-- ✅ 증상 2(SG 참조)는 코드 수정 완료 — `data`가 CIDR 기반으로 전환됨
-- ✅ `platform`/`workload` → `infrastructure`/`data` 디렉토리 rename 완료(git mv, backend key도 갱신)
-- ✅ 기존에 떠있던 AWS 리소스는 전부 destroy 완료 — 지금은 **완전히 빈 상태**(아래 참고)
-- ❌ **`k8s-addon` root 자체는 아직 안 만들어짐** — `helm_release.argocd`/`kubernetes_namespace.qket`가 여전히 `01_infrastructure/main.tf`에 같이 있음
-- ❌ **`registry` root도 아직 안 만들어짐** — ECR/github-actions-oidc는 여전히 `01_infrastructure/main.tf`에 같이 있음
+- ✅ **결정은 확정**: 이 문서의 Layer 1/Layer 2 분리 채택, root 이름을 `01_infrastructure`/`02_k8s-addon`/`03_registry`/`04_data`로 확정(apply 순서를 드러내는 숫자 접두사 포함)
+- ✅ 증상 2(SG 참조)는 코드 수정 완료 — `04_data`가 CIDR 기반으로 전환됨
+- ✅ `platform`/`workload` → `01_infrastructure`/`04_data` 디렉토리 rename 완료(git mv, backend key도 갱신)
+- ✅ 기존에 떠있던 AWS 리소스는 전부 destroy 완료 — AWS 계정은 빈 상태였음(마이그레이션 부담 없이 아래 작업 진행)
+- ✅ **`02_k8s-addon` root 신설 완료** — `helm_release.argocd`/`kubernetes_namespace.qket`를 `01_infrastructure`에서 이전함. `01_infrastructure/providers.tf`에서 kubernetes/helm/kubectl provider도 완전히 제거 — 이제 순수 AWS API 리소스만 남음. `terraform validate` 셋 다(`01_infrastructure`/`02_k8s-addon`/`04_data`) 통과 확인
+- ❌ **`03_registry` root는 아직 안 만들어짐** — ECR/github-actions-oidc는 여전히 `01_infrastructure/main.tf`에 같이 있음
 - ❌ Ingress Controller는 아직 `Infra/backup/`에 보류 중, 아직 어느 root에도 설치 안 됨
-- 다음 apply부터가 새 이름(`infrastructure`/`data`)으로 처음부터 다시 만드는 것 — `k8s-addon`/`registry`를 실제로 만들 좋은 타이밍(빈 상태에서 시작하니 마이그레이션 불필요)
+- 다음 실제 apply는 `01_infrastructure` → `02_k8s-addon` → `04_data` 순서로, 전부 빈 state에서 처음 시작하는 것 — 아직 `terraform apply`는 안 함(코드만 준비됨)
 
 ## 관련
 - [[eks-provider-auth]]

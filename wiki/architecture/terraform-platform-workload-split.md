@@ -91,7 +91,7 @@ ingress = [{
 
 트레이드오프: "정확히 이 SG(=이 ENI들)에서 오는 트래픽만"에서 "이 서브넷 대역에서 오는 트래픽"으로 범위가 살짝 넓어짐 — 그래도 여전히 VPC 프라이빗 서브넷 내부로 한정되므로 인터넷 노출 등의 리스크는 없음. 대신 `infrastructure`↔`data` 사이의 AWS 레벨 하드 의존이 완전히 사라져서, `infrastructure`를 몇 번을 destroy/재생성해도 `data`가 전혀 영향받지 않게 됨.
 
-> ⚠️ 남은 문제: `infrastructure` 안에 있는 `helm_release.argocd`/`kubernetes_namespace.qket`(kubernetes/helm provider 사용)는 이 CIDR 변경과 별개로, `infrastructure`를 destroy할 때 그 provider가 인증하는 데 쓰는 EKS Access Entry가 먼저 지워지면서 `Unauthorized`가 나는 문제가 남아있음 — [[eks-provider-auth]], [[../troubleshooting/eks-destroy-layer-separation]] 참고. 이건 이 문서(SG 결합 문제)와는 다른 원인이라 별도로 해결해야 함(제안된 해법: 이 두 리소스를 `infrastructure`에서 분리해 별도 root `k8s-addon`으로 빼는 것 — 아직 미구현).
+> ✅ 해결됨(2026-08-10): `helm_release.argocd`/`kubernetes_namespace.qket`(kubernetes/helm provider 사용)가 이 CIDR 변경과는 별개로, `infrastructure`를 destroy할 때 그 provider가 인증하는 데 쓰는 EKS Access Entry가 먼저 지워지면서 `Unauthorized`가 나는 문제가 있었다 — [[eks-provider-auth]], [[../troubleshooting/eks-destroy-layer-separation]] 참고. 이 두 리소스를 `infrastructure`에서 분리해 별도 root `02_k8s-addon`으로 옮겨서 해결함.
 
 ## 관련
 - [[terraform-module-boundaries]]

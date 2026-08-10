@@ -231,3 +231,15 @@
 - Infra 코드(모듈 주석, backup/README.md)와 위키 문서(관련 파일 전부) 안의 `Infra/infrastructure`, `Infra/data`, `infrastructure/main.tf` 같은 **경로** 참조를 전부 `01_infrastructure`/`04_data` 접두사 붙은 형태로 재수정
 - S3 backend의 state key(`key = "infrastructure/terraform.tfstate"` 등)는 숫자 접두사 없이 그대로 둠 — 로컬 디렉토리 정렬용 접두사와 S3 키 네이밍은 무관하다고 판단
 - `terraform validate`로 `01_infrastructure`/`04_data` 둘 다 정상 통과 재확인
+
+---
+
+## [2026-08-10] 이채영 | restructure | `02_k8s-addon` root 신설 — namespace/ArgoCD를 infrastructure에서 실제로 분리
+
+[[troubleshooting/eks-destroy-layer-separation]]에서 계속 "결정만 됐고 미구현"이라고 남겨뒀던 걸 실제로 구현함. `01_infrastructure/main.tf`의 `kubernetes_namespace.qket`/`helm_release.argocd`(+ 관련 output `argocd_namespace`)를 새 root `02_k8s-addon`으로 옮기고, `01_infrastructure/providers.tf`에서 kubernetes/helm/kubectl provider를 전부 제거해서 `01_infrastructure`가 진짜 순수 AWS API 리소스 전용 root가 되게 함.
+
+- `02_k8s-addon/`(backend.tf, remote-state.tf, providers.tf, variables.tf, main.tf, outputs.tf) 신규 작성 — provider 인증 패턴은 `01_infrastructure/providers.tf`/`04_data/providers.tf`와 동일(exec 방식 + `--role-arn`), `terraform_remote_state`로 `01_infrastructure`의 EKS 정보를 받아옴
+- `01_infrastructure`/`02_k8s-addon`/`04_data` 셋 다 `terraform validate` 통과 확인(아직 `apply`는 안 함 — AWS엔 여전히 아무것도 없는 상태)
+- [[runbook/terraform-apply-order]]를 2-root(infrastructure→data) 절차에서 **3-root(infrastructure→k8s-addon→data)** 절차로 전면 재작성
+- [[architecture/terraform-platform-workload-split]], [[troubleshooting/eks-destroy-layer-separation]], index.md의 "미구현"/"결정만 됨" 표시를 전부 "구현 완료"로 갱신
+- 남은 것: `03_registry`(ECR/github-actions-oidc 분리)는 여전히 미착수, Ingress Controller도 여전히 `backup/`에 보류 중
