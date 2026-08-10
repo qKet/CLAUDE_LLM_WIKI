@@ -207,6 +207,7 @@
   },
   "active": "f38aad6efc8508b8",
   "lastOpenFiles": [
+    "wiki/troubleshooting/eks-provider-auth.md",
     "Clippings/Amazon SES이란 무엇인가요 - Amazon Simple Email Service.md",
     "wiki/troubleshooting/github-actions-oidc-not-authorized.md",
     "wiki/troubleshooting/terraform-circular-module-dependency.md",

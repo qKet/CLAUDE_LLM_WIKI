@@ -134,3 +134,27 @@
 
 - [[conventions/comment-rules]]의 MyBatis 섹션에 ⚠️ 경고 추가 — 대시 테두리 금지, 필요하면 `=`나 `*` 사용할 것
 - 최종 형식은 findById에 사용자가 직접 되돌려놓은 심플한 `<!-- 이름 : ... -->` 블록 형식으로 확정
+
+---
+
+## [2026-08-10] 이채영 | troubleshooting | EKS provider 인증 문제(토큰 만료 + Unauthorized) 신규 문서화
+
+`Infra/platform/providers.tf`의 kubernetes/helm/kubectl provider 설정에 남아있던 주석(왜 data source 대신 exec 방식인지, 왜 `--role-arn`이 꼭 필요한지)이 실제로는 문서화가 안 돼 있던 걸 확인 — 관련 troubleshooting 페이지가 없었음. 두 가지 실제로 겪었던 문제(① apply가 오래 걸리면 미리 받아둔 토큰이 만료돼서 뒷부분 리소스에서 인증 실패 ② `--role-arn` 없이 붙이면 Access Entry가 `cluster_admin` role한테만 등록돼 있어서 Unauthorized)를 신규 페이지로 정리.
+
+- [[troubleshooting/eks-provider-auth]] 신설 — 증상 2개/원인/해결(exec 방식 + `--role-arn` 명시)/재발방지
+- [[terraform-module-boundaries]]의 `cluster_admin` 공유 role 패턴과 연결
+- index.md 갱신
+
+**부수적으로 발견한 별개 문제**: 템플릿으로 참고하려고 [[troubleshooting/terraform-circular-module-dependency]]를 다시 읽다가, 문서엔 "NAT Gateway를 `modules/subnet`으로 옮겨서 해결했다"고 적혀있는데 실제 `Infra/platform/main.tf`는 NAT Gateway/라우팅을 `subnet` 모듈도 `vpc` 모듈도 아닌 **root(`platform/main.tf`) 레벨**에 두고 있는 걸 발견 — 코드와 문서가 어긋나 있었음(아마 설계 방향이 중간에 바뀌었는데 문서는 안 갱신됨). CLAUDE.md 원칙대로 기존 서술을 지우지 않고 ⚠️ 모순 블록으로 표시 + 실제 코드 위치와 근거를 남김.
+
+---
+
+## [2026-08-10] 이채영 | decision | 네임스페이스 생성을 workload/ArgoCD에서 platform으로 이전
+
+`workload` apply 시 `namespaces "qket-release" not found` 에러 발생 — 원인은 네임스페이스를 ArgoCD(`Infra/kubernetes/{release,prod}/namespace_qKet.yaml`)가 관리하도록 이미 옮겨놨는데(이전 세션에서 `kubernetes_namespace.this`를 `terraform state rm`으로 뗌 — **이 마이그레이션 자체가 위키에 한 번도 기록된 적이 없었음**, 이번에 확인하며 발견), 그 YAML을 실제로 sync할 ArgoCD Application("infra-manifests")이 아직 안 만들어져서 새 클러스터엔 네임스페이스가 하나도 없는 상태였기 때문. 매번 수동 `kubectl apply`로 임시 처리하는 대신, `platform`(workspace 없이 한 번만 apply)이 `qket-release`/`qket-prod` 둘 다 `for_each`로 미리 만들어두도록 변경.
+
+- `Infra/platform/main.tf`에 `resource "kubernetes_namespace" "qket"` 신설(`for_each`)
+- `Infra/workload/main.tf`의 stale한 주석(주석 처리된 `kubernetes_namespace.this` 블록)을 정리하고 platform 쪽을 가리키도록 갱신
+- [[runbook/terraform-apply-order]] 갱신: 스킴 경로 오타(`Infra/terraform/platform` → `Infra/platform`, 예전 모노레포 흔적) 수정, namespace 의존성 설명 추가, "아직 apply 안 됨"이라는 stale한 문구 제거(실제로는 이미 여러 번 apply/destroy 거친 상태)
+- networkpolicy/ingress는 여전히 `Infra/kubernetes/*.yaml` + ArgoCD 관리 — 네임스페이스만 예외적으로 Terraform(platform)이 갖고 감
+- **미해결로 남긴 것**: `Infra/kubernetes/{release,prod}/namespace_qKet.yaml` 파일이 이제 중복(platform이 이미 만듦) — 사용자 확인 결과 지금은 삭제하지 않고 남겨두고, ArgoCD "infra-manifests" Application을 실제로 만들 때 다시 정리하기로 함. 그 Application 자체도 여전히 미구현.
