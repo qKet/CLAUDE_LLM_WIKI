@@ -158,3 +158,12 @@
 - [[runbook/terraform-apply-order]] 갱신: 스킴 경로 오타(`Infra/terraform/platform` → `Infra/platform`, 예전 모노레포 흔적) 수정, namespace 의존성 설명 추가, "아직 apply 안 됨"이라는 stale한 문구 제거(실제로는 이미 여러 번 apply/destroy 거친 상태)
 - networkpolicy/ingress는 여전히 `Infra/kubernetes/*.yaml` + ArgoCD 관리 — 네임스페이스만 예외적으로 Terraform(platform)이 갖고 감
 - **미해결로 남긴 것**: `Infra/kubernetes/{release,prod}/namespace_qKet.yaml` 파일이 이제 중복(platform이 이미 만듦) — 사용자 확인 결과 지금은 삭제하지 않고 남겨두고, ArgoCD "infra-manifests" Application을 실제로 만들 때 다시 정리하기로 함. 그 Application 자체도 여전히 미구현.
+
+---
+
+## [2026-08-10] 이채영 | decision | 이 위키 레포는 Claude Code가 직접 commit/push (팀원 전원 공통 규칙)
+
+`frontend`/`backend`/`Infra`는 팀원이 직접 commit/push하는 게 원칙이지만, 이 위키 레포(`CLAUDE_LLM_WIKI`)만큼은 Claude Code가 갱신할 때마다 사용자 확인 없이 바로 commit/push까지 하기로 결정 — 위키는 "Claude Code가 유지보수하는 문서"라는 성격이라 다른 코드 레포와 다르게 취급. 처음엔 한 팀원 개인 세션에서만 적용되는 걸로 얘기가 나왔다가, "팀원들도 각각의 클로드가 직접 푸쉬하고 관리해야" 한다는 요청으로 **팀 전체 공통 규칙**으로 확정.
+
+- `CLAUDE.md`(위키 운영 규칙)에 "다른 레포와 다른 점" 섹션 신설 + 세션 시작 체크리스트 6번 항목 갱신 — 어느 팀원의 세션이든 git으로 pull 받는 이 파일을 읽으면 동일하게 적용됨
+- (참고) Claude Code의 로컬 메모리 기능에도 이 규칙을 기록해뒀지만, 그건 특정 기기/세션에 종속된 개인 기억이라 팀 전체엔 전파 안 됨 — 팀 규칙의 진짜 소스는 이 `CLAUDE.md`
