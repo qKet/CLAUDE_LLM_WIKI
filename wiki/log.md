@@ -192,3 +192,15 @@
 - `modules/subnet/outputs.tf`, `platform/outputs.tf`, `workload/main.tf` 수정 (아직 apply 안 함 — 코드만 반영)
 - [[architecture/terraform-platform-workload-split]]에 "workload가 platform의 SG를 참조하면 안 되는 이유" 섹션 신설, 스킴 경로 오타(`Infra/terraform/*`)도 같이 수정
 - ⚠️ 남은 문제: `helm_release.argocd`/`kubernetes_namespace.qket`가 `platform` destroy 시 Access Entry 소실로 Unauthorized 나는 문제는 이것과 별개 원인이라 아직 미해결 — 제안된 해법(별도 root `cluster-bootstrap` 분리)도 미구현. index.md 고아 항목 참고.
+
+---
+
+## [2026-08-10] 이채영 | troubleshooting | EKS destroy 문제 종합 정리 — Layer 1(platform)/Layer 2(cluster-bootstrap) 분리로 결정
+
+실제로 `platform` destroy를 돌리다 bastion SG `DependencyViolation`으로 중간에 멈추는 걸 겪음(NAT/라우팅/bastion 인스턴스/ECR/OIDC/ArgoCD/namespace/노드그룹은 지워졌는데 VPC/서브넷/EKS 클러스터/bastion SG만 남은 상태) — 이 과정에서 output이 이미 지워진 리소스(`helm_release.argocd` 등)를 참조하고 있어서 state의 output이 통째로 비어버렸고, 그 여파로 `workload`의 `terraform_remote_state` 읽기까지 "no attributes" 에러로 막힘.
+
+이걸 계기로 지금까지 개별적으로 대응해온 문제들(증상1: kubernetes/helm provider Unauthorized, 증상2: workload↔platform SG 직접참조로 인한 DependencyViolation)이 사실 "**Layer 1(순수 AWS)과 Layer 2(K8s addon)를 한 state에 섞어놓은 것**"이라는 하나의 근본 원인에서 갈라져 나온 증상들이라는 걸 정리 — 사용자가 실제 운영 요구사항(workload는 절대 안 지움/데이터, platform은 매일 수동으로 켜고 끔/비용 절감, registry는 공유·불변, Ingress Controller·Grafana 같은 third-party는 따로 관리하고 싶음)을 구체화하면서 최종 구조를 4-root(`workload`/`registry`/`platform`/`cluster-bootstrap`)로 확정.
+
+- [[troubleshooting/eks-destroy-layer-separation]] 신설 — 증상 3개(1·2는 실제로 겪음, 3번 Ingress Controller의 ALB/ENI 잔존 문제는 아직 안 겪었지만 같은 계열이라 미리 남김), 원인 표, Layer 분리 해법, **"현재 구현 상태" 섹션에 뭐가 코드로 됐고(SG CIDR 전환) 뭐가 아직 결정만 됐는지(cluster-bootstrap root 자체) 정직하게 구분**
+- index.md 갱신 — 고아 항목을 이 문서 하나로 통합해서 가리키게 정리, Ingress Controller 재활성화 시 주의사항 추가
+- 아직 미해결: `cluster-bootstrap` root 실제 생성, `registry` root 실제 생성, `workload`에 `prevent_destroy` 추가 — 전부 다음 작업으로 남음
