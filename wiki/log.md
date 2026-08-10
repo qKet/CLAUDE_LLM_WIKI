@@ -255,3 +255,13 @@
 - [[runbook/daily-infrastructure-toggle]] 신설 — 배경(왜 새 root 대신 이 방식을 택했는지), 순서가 중요한 이유(k8s-addon 먼저 지워야 Unauthorized 안 남), 주의사항
 - index.md 갱신
 - **의사결정 과정 자체를 기록**: 처음엔 "구조적으로 제일 깔끔한" `00_network` 분리를 제안했다가, 사용자의 "계속 나누기만 하면 관리 부담이 커진다"는 현실적 피드백을 받고 더 단순한 대안으로 선회한 것 — 항상 "가장 깔끔한 구조"가 정답은 아니라는 사례로 남겨둠
+
+---
+
+## [2026-08-10] 이채영 | ingest | up.sh/down.sh 쉘 스크립트 폐기 → Infra/README.md로 전환
+
+바로 위에서 만든 `Infra/up.sh`/`down.sh`를 사용자가 "sh 파일은 맥 사용자(나)만 편하게 쓴다 — 팀원 중 Windows 쓰는 사람 있으면 못 씀"이라는 이유로 폐기 요청. `terraform -chdir=...` 플래그를 쓰면 셸 종류를 안 타서 OS 상관없이 그대로 복붙 가능하다는 걸 활용해, 스크립트 대신 **명령어를 `Infra/README.md`에 직접 적어두는 방식**으로 전환.
+
+- `Infra/up.sh`, `Infra/down.sh` 삭제
+- `Infra/README.md` 신설 — root 구조 요약, 최초 적용 순서, 매일 아침/저녁 절차(`-chdir` 명령어), 위키 문서 링크 목록까지 포함
+- [[runbook/daily-infrastructure-toggle]]도 스크립트 참조를 명령어 직접 기재로 갱신, 상단에 이 전환 이유를 명시
