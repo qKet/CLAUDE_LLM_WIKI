@@ -43,7 +43,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 ## runbook/ — 반복 운영 절차
 - [[db-schema-change]] — 로컬 DB 스키마 변경 절차 2가지
 - [[terraform-apply-order]] — Terraform 최초 적용 절차 (infrastructure → k8s-addon → registry/data, 구 platform → workload)
-- [[daily-infrastructure-toggle]] — 매일 아침/저녁 `01_infrastructure` 켜고 끄기 (`Infra/README.md`에 명령어 정리, `04_data`는 안 건드림)
+- [[daily-infrastructure-toggle]] — 매일 아침/저녁 `01_infrastructure`/`02_k8s-addon` 켜고 끄기 (`Infra/README.md`에 명령어 정리, `04_data`는 AWS 리소스는 안 건드리지만 K8s 오브젝트 재생성 위해 아침에 apply 한 번 더 필요)
 
 ---
 

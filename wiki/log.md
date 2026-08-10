@@ -278,3 +278,15 @@
 - [[runbook/terraform-apply-order]]를 3-root에서 **4-root**(infrastructure→k8s-addon→registry/data, registry는 순서 무관) 절차로 재작성
 - [[troubleshooting/eks-destroy-layer-separation]], index.md의 "registry 미착수" 표시를 전부 "구현 완료"로 갱신
 - 남은 것: Ingress Controller만 여전히 `backup/`에 보류 중, `argocd/qket-cd-app.yaml`을 실제로 클러스터에 등록하는 것(App-of-Apps 구현)도 아직
+
+---
+
+## [2026-08-10] 이채영 | troubleshooting | 매일 아침 `04_data`도 다시 apply해야 하는 이유 발견
+
+팀원이 `qKet/CD` 레포의 Helm 차트로 backend를 띄우려다 IRSA 권한 에러를 겪음 — 원인 진단 과정에서 `qket-backend` ServiceAccount(`04_data`가 만듦)가 `02_k8s-addon`이 관리하는 네임스페이스 **안에** 있다는 걸 재확인. 이어서 "그럼 `02_k8s-addon`을 매일 밤 destroy하면 그 안의 `04_data` 소유 오브젝트(ServiceAccount/ConfigMap)는 어떻게 되나"를 사용자가 직접 질문하면서 발견: **네임스페이스가 지워지면 Kubernetes가 그 안의 모든 오브젝트를 자동으로 cascade delete**하므로, `04_data`의 실제 AWS 리소스(RDS/Redis/S3)는 안전하지만 K8s 오브젝트 3개(ServiceAccount 1 + ConfigMap 2)는 매일 밤 같이 사라지고 `04_data`의 state와 drift가 생김.
+
+이걸 `02_k8s-addon`으로 옮겨서 해결하려는 아이디어도 나왔으나, `04_data`의 값(RDS 포트/S3 버킷명 등)을 참조해야 해서 apply 순서상 순환 의존이 생겨 불가능하다는 것도 확인 — 대신 "아침에 `04_data`도 한 번 더 apply"(RDS/Redis는 안 건드리고 K8s 오브젝트 3개만 재생성, 비용/리스크 없음)로 대응하기로 함. 근본적 해결(ESO로 K8s 바깥에 연결 정보를 두는 것)은 나중 과제로 명시.
+
+- `Infra/README.md`, [[runbook/daily-infrastructure-toggle]] 둘 다 아침 절차에 `04_data apply`(release/prod) 3번째 단계로 추가 + "왜 필요한가" 설명 섹션 신설
+- Helm 차트 쪽 체크리스트도 주의사항에 추가: `serviceAccount.create: false` + `qket-backend` 참조 확인
+- index.md 갱신
