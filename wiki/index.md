@@ -31,6 +31,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[2026-08-06-ecr-recreate-vs-import]] — 기존 ECR 저장소 import 대신 삭제 후 재생성
 - [[2026-08-10-redis-session-queue-shared-instance-risk]] — 세션/대기열이 같은 Redis 인스턴스 공유 시 리스크(noisy neighbor, 메모리 압박), 페일오버로도 안 풀리는 부분, 물리 분리 vs 논리 DB 분리 비용 비교 (논의중 — 부하테스트 후 재검토)
 - [[2026-08-10-cd-writeback-github-app]] — CD 레포 write-back 인증으로 GitHub App 선택(PAT 대신) — 장기 자격증명을 시크릿에 안 두려는 원칙, 개인 계정으로 잘못 생성됐던 시행착오 포함
+- [[2026-08-11-monitoring-stack-design]] — 모니터링 스택 설계(kube-prometheus-stack + Loki + CloudWatch 연동), 로그/지표 영구 저장소를 `03_registry`에 두기로 한 이유, 1차/2차 범위 구분 (논의중 — 코드 구현 전, 알림 채널 미정)
 
 ## troubleshooting/ — 실제 겪은 버그
 - [[null-field-partial-update-bug]] — nullable FK 부분 업데이트 버그 (백/프론트 양쪽)
@@ -60,3 +61,5 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - ESO(External Secrets Operator)만 여전히 `Infra/backup/`에 보류 중 — ALB Controller는 2026-08-10에 `02_k8s-addon`으로 재활성화 완료
 - [[cd-helm-chart-deploy-review]]의 OAuth 3사(Google/Kakao/Naver) client-id/secret + `TOSS_SECRET_KEY`가 CD 차트에 안 연결돼 있음 — 실제 발급값이 준비되면 ESO 패턴으로 새 Secret 추가 필요
 - prod용 ArgoCD Application이 아직 없음 — release용(`Infra/argocd/qket-cd-app.yaml`)만 있고, prod는 `valueFiles: [values.yaml, values-prod.yaml]` 레이어링이 필요함 ([[cd-helm-chart-deploy-review]] 참고)
+- [[decisions/2026-08-11-monitoring-stack-design]] 실제 구현 안 됨(설계만 논의) — 알림 채널(Slack/이메일) 미정, 지표용 EBS의 AZ 고정/node affinity 코드 미작성
+- 2026-08-11에 `02_k8s-addon` 실제 apply/destroy 중 겪은 문제들(ALB Controller destroy 순서, kubectl_manifest가 finalizer를 안 기다리는 문제, ArgoCD/ExternalDNS와 ALB Controller의 webhook 레이스, ExternalDNS TXT 소유권 없는 수동 레코드 방치)이 아직 troubleshooting 문서로 안 남겨짐 — 필요하면 추가 정리 예정

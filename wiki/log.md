@@ -341,3 +341,17 @@ ALB Controller로 ALB는 생기는데 `dev.jun979.click`/`app.jun979.click` 같�
 - [[troubleshooting/cd-helm-chart-deploy-review]] 신설 — 4가지 문제 각각의 증상/원인/해결 + 공통 재발방지("CI 통과 ≠ 배포 시 동작")
 - index.md 갱신 (고아 페이지 섹션에 OAuth/Toss 시크릿 미해결, prod ArgoCD Application 미존재 항목 추가)
 - Infra/CD/backend/frontend 레포 커밋은 평소처럼 사용자가 직접 함
+
+---
+
+## [2026-08-11] 이채영 | decision | 모니터링 스택 설계 논의 (Prometheus/Grafana/Loki)
+
+지표/DB상태/로그가 서로 다른 도구가 필요한 별개 문제라는 걸 먼저 정리하고, 각각 어떤 도구를 쓸지·어디에 배치할지 논의함. 실제 코드 구현 전, 설계 결정만 기록.
+
+- `kube-prometheus-stack`(지표) + `Loki`(로그, ELK 대신 — 팀 규모에 안 맞음) + Grafana(CloudWatch 데이터소스로 RDS/Redis 상태까지 한 화면에서 봄)
+- 흥미로운 삽질: 로그/지표 영구 저장소(S3/EBS)를 처음엔 `02_k8s-addon`에 두려다가, 사용자가 "밤에 지우면 사라지는거 아니야?"라고 바로 잡아냄 — `02_k8s-addon`은 매일 밤 destroy되는 root라 영구 저장소를 두면 안 됨. `04_data`는 workspace(release/prod)별로 두 번 생성되는 구조라 클러스터 전체가 공유하는 단일 저장소엔 안 맞고, 결국 이미 있던 "공유·불변·release/prod 구분 없음" 성격의 `03_registry`(ECR/OIDC)에 두기로 함 — 새 root를 안 만들고 기존 분류 체계를 재활용
+- release/prod 로그를 한 버킷에 모아도 되는지도 논의 — Loki/Prometheus 둘 다 라벨 기반이라 물리적으로 한 곳에 저장돼도 조회 시 완전히 분리되므로 문제없음
+- 1차 범위(이번에 같이): 클러스터 지표, 로그, CloudWatch DB 연동, 외부 헬스체크(Blackbox — 오늘 겪은 ExternalDNS 문제를 사람이 발견하기 전에 알림 왔을 것), ALB 에러율, 배포 annotation
+- 2차 범위(나중): 비즈니스 지표(예매/결제), 비용 모니터링(오늘 겪은 고아 리소스 과금 감시), 분산 트레이싱
+- [[decisions/2026-08-11-monitoring-stack-design]] 신설
+- index.md 갱신 — 오늘 실제로 겪은 ALB destroy 순서/kubectl_manifest finalizer/webhook 레이스/ExternalDNS TXT 소유권 문제들이 아직 troubleshooting 문서로 안 남겨진 것도 고아 페이지 섹션에 표시해둠(추후 정리 필요)
