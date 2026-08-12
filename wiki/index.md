@@ -56,6 +56,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[payment-eso-secret-staleness]] — Toss 결제 400 에러, 원인은 페어링 불일치가 아니라 ESO 1시간 재동기화 주기 동안 K8s Secret에 남아있던 stale한 값
 - [[ses-dkim-preexisting-records-import]] — `03_registry` 첫 apply에서 SES DKIM CNAME이 이미 존재해 실패, `terraform import`로 기존 레코드를 state에 편입
 - [[lambda-env-var-and-runtime-version-gotchas]] — Lambda 예약 환경변수(`AWS_REGION`) 직접 설정 불가, `nodejs24.x`는 AWS provider v6.21.0+ 필요(현재 `~> 5.0` 고정이라 업그레이드 전까지 `nodejs22.x` 사용)
+- [[grafana-amp-datasource-missing-auth-token]] — Grafana의 `grafana-amazonprometheus-datasource` 플러그인이 쿼리 요청에 인증 헤더를 안 붙이는 문제(IRSA/access key 둘 다 동일 실패, AMP API/IAM은 정상 확인됨) — **미해결**, remoteWrite(데이터 저장)는 정상 작동 중
 
 ## runbook/ — 반복 운영 절차
 - [[db-schema-change]] — 로컬 DB 스키마 변경 절차 2가지
@@ -75,7 +76,8 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - ✅ (갱신) ESO(External Secrets Operator)는 2026-08-10에 이미 재활성화됨(`04_data`에서 `module.eso`로 db-secrets/redis-secrets/external-api-secrets 전부 동기화 중) — 이 줄이 옛날에 "여전히 backup/에 보류 중"이라고 남아있던 건 드리프트, 이번에 바로잡음
 - ✅ (해결) [[cd-helm-chart-deploy-review]]의 OAuth 3사/`TOSS_SECRET_KEY` 미연결 문제 — [[decisions/2026-08-11-external-api-secrets-manager]]로 해결
 - prod용 ArgoCD Application이 아직 없음 — release용(`Infra/argocd/qket-cd-app.yaml`)만 있고, prod는 `valueFiles: [values.yaml, values-prod.yaml]` 레이어링이 필요함 ([[cd-helm-chart-deploy-review]] 참고)
-- ✅ (부분 해결) [[decisions/2026-08-11-monitoring-stack-design]] — 클러스터 지표+CloudWatch DB 연동+Grafana 노출은 구현 완료. 여전히 미해결: Loki(로그), 알림 채널(Slack/이메일), 지표용 EBS AZ 고정/node affinity, Blackbox 외부 헬스체크, ALB 에러율 연동, 배포 annotation
+- ✅ (대부분 해결, 2026-08-12) [[decisions/2026-08-11-monitoring-stack-design]] — `module.monitoring`(kube-prometheus-stack) 실제 apply, 클러스터 지표+CloudWatch DB 연동+Grafana 노출, backend ServiceMonitor(release만), 대시보드 git+ConfigMap 영구저장까지 완료. 지표 영구저장은 문서상 EBS 방침에서 **AMP**(Amazon Managed Prometheus)로 방향을 바꿔서 remoteWrite 검증까지 완료(EBS는 `ReclaimPolicy: Delete`라 EKS destroy 시 볼륨까지 같이 사라져서 "클러스터 재생성에도 유지"라는 목표 자체를 못 푸는 걸 확인하고 기각). 여전히 미해결: Grafana→AMP 직접 조회([[troubleshooting/grafana-amp-datasource-missing-auth-token]] — 플러그인 버그로 추정), Loki(로그), 알림 채널(Slack/이메일), Blackbox 외부 헬스체크, ALB 에러율 연동, 배포 annotation
+- 2026-08-11에 `02_k8s-addon` 실제 apply/destroy 중 겪은 문제들(ALB Controller destroy 순서, kubectl_manifest가 finalizer를 안 기다리는 문제, ArgoCD/ExternalDNS와 ALB Controller의 webhook 레이스, ExternalDNS TXT 소유권 없는 수동 레코드 방치)이 아직 troubleshooting 문서로 안 남겨짐 — 필요하면 추가 정리 예정
 - [[decisions/2026-08-11-vpn-access-control-paused]] — dev/Grafana/CD를 VPN 필수로 바꿀지 논의만 하고 팀 상의를 위해 보류됨. **팀 결정 없이 임의로 재개하지 말 것**
 - `modules/messaging`의 Lambda 코드(`lambda-src/index.mjs`)는 팀원이 작성한 실제 코드로 교체 완료했지만, 실제 배포 후 end-to-end 발송 테스트(SQS에 메시지 넣어서 진짜 메일이 오는지)는 아직 안 해봄
 - 콘솔에서 예전에 수동으로 만들어져 있던 `qket-email-verification-lambda`(Terraform 미관리) — 새 Terraform 관리 함수(`team5-qket-email-verification-release`)가 정상 동작 확인되면 정리 필요
