@@ -3,7 +3,7 @@ title: infrastructure / data 2-root 구조와 workspace (구 platform/workload)
 category: architecture
 tags: [infra, terraform]
 created: 2026-08-06
-updated: 2026-08-10
+updated: 2026-08-11
 ---
 
 # infrastructure / data 2-root 구조와 workspace
@@ -93,9 +93,26 @@ ingress = [{
 
 > ✅ 해결됨(2026-08-10): `helm_release.argocd`/`kubernetes_namespace.qket`(kubernetes/helm provider 사용)가 이 CIDR 변경과는 별개로, `infrastructure`를 destroy할 때 그 provider가 인증하는 데 쓰는 EKS Access Entry가 먼저 지워지면서 `Unauthorized`가 나는 문제가 있었다 — [[eks-provider-auth]], [[../troubleshooting/eks-destroy-layer-separation]] 참고. 이 두 리소스를 `infrastructure`에서 분리해 별도 root `02_k8s-addon`으로 옮겨서 해결함.
 
+## `try()`로 nightly-off 상태의 `-refresh-only`/`plan`을 방어하는 패턴
+
+`01_infrastructure`는 매일 밤 destroy되는 대상([[../runbook/daily-infrastructure-toggle]])이라, 아침에 다시 apply되기 전까지는 `bastion` 보안그룹처럼 "밤엔 존재하지 않는 리소스"가 실제로 있다. 문제는 Terraform이 `-refresh-only`/`plan`을 돌릴 때 **그 리소스가 지금 state에 있든 없든 config 표현식 자체는 항상 평가한다**는 것 — `module.security_group.security_group_ids["bastion"]`처럼 map 인덱싱을 직접 쓰면, bastion SG가 없는 밤 시간대엔 `Invalid index` 에러로 `-refresh-only`가 통째로 하드-실패한다(이 값을 실제로 쓰는 리소스가 지금 존재하냐 마냐와 무관하게, config에 그 표현식이 적혀있다는 사실만으로 에러가 남).
+
+`01_infrastructure/outputs.tf`의 `bastion_security_group_id` output과 `main.tf`의 `module "ec2"`가 받는 `security_group_id` 인자, 이 두 곳 모두 실제로 이 에러를 겪었고, `try(module.security_group.security_group_ids["bastion"], null)`로 감싸서 해결했다.
+
+```hcl
+# 밤에 bastion SG가 없어도 -refresh-only/plan이 하드-에러 없이 null로 넘어가게
+output "bastion_security_group_id" {
+  value = try(module.security_group.security_group_ids["bastion"], null)
+}
+```
+
+이 패턴은 "밤엔 없을 수 있는 리소스를 참조하는 모든 표현식"에 재사용 가능한 일반 해법 — 앞으로 nightly-toggle 대상에 optional 리소스를 추가할 때마다 같은 이유로 필요해질 수 있다.
+
 ## 관련
 - [[terraform-module-boundaries]]
 - [[terraform-remote-state]]
 - [[2026-08-06-terraform-module-restructure]]
 - [[../troubleshooting/eks-provider-auth]]
 - [[../troubleshooting/eks-destroy-layer-separation]]
+- [[../troubleshooting/destroy-order-incident-and-webhook-orphans]]
+- [[../runbook/daily-infrastructure-toggle]]

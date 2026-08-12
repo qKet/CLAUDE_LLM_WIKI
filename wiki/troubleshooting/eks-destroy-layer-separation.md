@@ -11,6 +11,8 @@ updated: 2026-08-10
 > ⚠️ root 이름이 `platform`→`infrastructure`, `workload`→`data`로 바뀌었고(2026-08-10, 기능 동일), 이 문서가 제안하는 Layer 2 root의 이름도 `cluster-bootstrap`이 아니라 **`k8s-addon`**으로 정했다. 이 문서는 새 이름 기준으로 갱신했다.
 >
 > ✅ 2026-08-10: 이 문서의 "해결"(Layer 분리)이 실제로 구현됐다 — `helm_release.argocd`/`kubernetes_namespace.qket`가 `02_k8s-addon`으로 이전 완료. "현재 구현 상태" 섹션 참고.
+>
+> ⚠️ 2026-08-11: 이 문서가 경고한 destroy 순서를 실제로 어겨서(`01_infrastructure`를 `02_k8s-addon`보다 먼저 destroy) 사고가 났다 — IAM 손상, ALB/SG 고아 리소스, admission webhook이 컨트롤러 파드보다 오래 살아남아 finalizer를 영구히 막는 문제까지 실전에서 재현됨. 자세한 증상/복구 절차는 [[destroy-order-incident-and-webhook-orphans]].
 
 ## 배경
 

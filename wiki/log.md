@@ -358,6 +358,92 @@ ALB Controller로 ALB는 생기는데 `dev.jun979.click`/`app.jun979.click` 같�
 
 ---
 
+## [2026-08-11] 이채영 | troubleshooting | 실제 destroy 순서 사고 — IAM 손상 복구 + ALB/webhook 고아 리소스 정리
+
+[[troubleshooting/eks-destroy-layer-separation]]이 이론으로만 경고했던 문제를 실전에서 그대로 겪음 — `01_infrastructure`를 `02_k8s-addon`보다 먼저 destroy하다가 `module.eks`의 cluster_admin IAM Role/Access Entry가 먼저 지워지면서 `02_k8s-addon`이 통째로 `Unauthorized`로 막힘. 복구하면서 새로운 패턴의 문제를 두 개 더 발견함: (1) 죽은 ALB Controller/ESO 파드가 정리 못 한 ALB/Target Group/Security Group이 AWS에 고아로 남는 문제, (2) 컨트롤러가 죽어도 그 컨트롤러가 등록한 admission webhook(`ValidatingWebhookConfiguration` 등)은 클러스터에 그대로 남아서 **이후 그 리소스 타입 전체의 finalizer 제거까지 영구히 막아버리는** 데드락 — ALB Controller(`aws-load-balancer-webhook`)와 ESO(`externalsecret-validate`/`secretstore-validate`) 둘 다에서 재현.
+
+- 타겟 지정 재-apply(`-target=module.eks.aws_iam_role.cluster_admin` 등 4개)로 IAM 접근권 복구, AWS CLI로 고아 ALB/TG/SG 수동 삭제(같은 패턴이 그날 두 번 발생), 고아 webhook 설정 삭제 후 finalizer patch로 namespace terminating 완료, IAM Group에 남은 사용자 5명 제거 후 `module.eks` destroy 재실행
+- [[troubleshooting/destroy-order-incident-and-webhook-orphans]] 신설 — 전체 증상/원인/복구 절차/재발방지
+- [[troubleshooting/eks-destroy-layer-separation]]에 이 실제 사고를 상단 경고로 링크 추가
+- `kubernetes_ingress_v1`(kubernetes provider, finalizer를 제대로 기다림)로 Ingress를 관리하고, Ingress에 `depends_on = [module.alb_controller]`를 걸어 destroy 순서를 강제하는 기존 코드 패턴이 왜 필요한지도 이 문서에서 근거로 남김
+
+---
+
+## [2026-08-11] 이채영 | ingest | `01_infrastructure`의 `try()` 방어 패턴 정리
+
+`bastion` 보안그룹처럼 매일 밤 destroy 대상이라 "밤엔 없는 리소스"를 직접 인덱싱(`module.security_group.security_group_ids["bastion"]`)하던 코드 2곳(`outputs.tf`, `main.tf`의 `module "ec2"`)이 밤 시간대 `-refresh-only`/`plan`을 `Invalid index`로 하드-실패시키던 걸 `try(..., null)`로 감싸 해결한 기존 코드 수정을 문서화.
+
+- [[architecture/terraform-platform-workload-split]]에 "`try()`로 nightly-off 상태의 `-refresh-only`/`plan`을 방어하는 패턴" 섹션 신설 — 앞으로 nightly-toggle 대상에 optional 리소스가 추가될 때 재사용 가능한 일반 해법으로 남김
+
+---
+
+## [2026-08-11] 이채영 | decision | OAuth/Toss 외부 API 키 Secrets Manager 관리 + 프론트 CI 키 전달 방식
+
+[[troubleshooting/cd-helm-chart-deploy-review]]에서 미해결로 남았던 OAuth 3사/Toss 키 연결을 실제 발급값이 준비되면서 처리함. db-secrets/redis-secrets와 같은 ESO 패턴으로 Secrets Manager 새 시크릿 `external_api`(7개 키)를 만들고, 사람이 콘솔로 채운 값이 반복 `terraform apply`에 덮어써지지 않도록 `ignore_changes`로 보호. 프론트 빌드 타임에만 필요한 `NEXT_PUBLIC_TOSS_CLIENT_KEY`는 GitHub Secrets 복제 대신 프론트 CI가 이미 가진 AWS OIDC 인증으로 Secrets Manager에서 직접 fetch하도록 구현(사용자가 GitHub Secrets 사용을 명시적으로 거부: "깃 씨크릿은 쓰기싫은데").
+
+- [[decisions/2026-08-11-external-api-secrets-manager]], [[decisions/2026-08-11-frontend-ci-toss-key-secrets-manager]] 신설
+- `modules/eso`에 `external_api_keys` 변수/시크릿 추가, `modules/github-actions-oidc`에 frontend CI Role 전용 Secrets Manager 읽기 정책 추가(이름 접두사 와일드카드로 범위 제한)
+- 이후 실제 결제 테스트 중 ESO 동기화 지연으로 K8s Secret에 stale한 값이 남아있던 문제를 겪음 — [[troubleshooting/payment-eso-secret-staleness]] 신설(원인 오인했던 과정도 같이 기록: 페어링 불일치가 아니라 동기화 지연이었음)
+- [[troubleshooting/cd-helm-chart-deploy-review]]의 미해결 표시를 해결됨으로 갱신, index.md 갱신
+
+---
+
+## [2026-08-11] 이채영 | decision | `/api` 라우팅을 Next.js `rewrites()`에서 ALB path 라우팅으로 이전
+
+[[troubleshooting/cd-helm-chart-deploy-review]]의 문제 1 해결책이었던 `next.config.js`의 `rewrites()` 프록시 방식이 실제 프로덕션 버그를 냈음 — Next.js `rewrites()`는 빌드 타임에 값을 정적으로 얼리는데, 이게 컨테이너 이미지 재사용 배포 모델과 안 맞아서 배포 시점 값이 반영 안 되는 문제로 나타남. `/api/*` 라우팅 책임을 프론트 컨테이너에서 완전히 빼고 ALB가 path 기반으로 backend/frontend Ingress에 직접 라우팅하도록 변경.
+
+- Ingress를 `app_ingress_backend`(path `/api`)/`app_ingress_frontend`(path `/`)로 분리 — healthcheck-path가 서로 다른 것도 분리 이유(annotation이 Ingress 오브젝트 단위 적용이라 하나로는 둘 다 못 만족)
+- `group.name` 공유로 물리 ALB는 하나 유지
+- [[decisions/2026-08-11-frontend-api-routing-alb-not-rewrites]] 신설
+- [[troubleshooting/cd-helm-chart-deploy-review]]의 문제 1 섹션에 "⚠️ 모순" 표시로 이 변경을 링크(기존 "해결"이 더 이상 실제 배포 방식이 아님을 명시)
+- 미해결로 남김: 로컬 개발(`npm run dev`) 환경엔 ALB가 없어서 `/api` 프록시 방식이 배포 환경과 갈라짐 — 온보딩 문서 반영 필요
+
+---
+
+## [2026-08-11] 이채영 | decision + troubleshooting | 모니터링 실제 구현(Grafana+CloudWatch) + Grafana/ArgoCD 공유 IP제한 ALB
+
+[[decisions/2026-08-11-monitoring-stack-design]]에서 논의만 해뒀던 설계를 실제로 구현. 단, 범위를 좁혀서 Loki(로그)는 이번엔 빼고 클러스터 지표+DB CloudWatch 연동+Grafana 노출까지만 진행. Grafana 노출 방식도 논의 때 정한 "포트포워딩만"에서 "IP 허용목록 Ingress(공개 도메인)"로 바뀜 — 실사용 편의성 때문. ArgoCD UI와 하나의 ALB를 공유하는 구조로 합침(처음엔 도구별로 분리했다가, IP 정책이 어차피 팀 전체로 동일해서 하나로 합치는 게 관리 포인트가 적다고 판단).
+
+- `modules/monitoring` 신설(kube-prometheus-stack helm_release + Grafana IRSA/CloudWatch 읽기전용 정책)
+- `02_k8s-addon/admin-ingress.tf` 신설 — `grafana.jun979.click`/`cd.jun979.click` 전용 ACM 인증서(DNS 검증 자동화), `group.name = "qket-admin"` 공유, `inbound-cidrs`로 팀 IP만 허용, 서로 다른 healthcheck-path(로그인 무관 200 고정 엔드포인트로 일부러 선택)
+- ALB Controller가 `group.name`을 바꿔도 옛 IngressGroup(ALB/TG)을 자동으로 안 치운다는 것도 실제로 겪음(그룹을 분리→합치는 과정에서) — 옛 ALB 2개 수동 정리
+- [[decisions/2026-08-11-monitoring-stack-design]]에 "구현 결과" 섹션 추가(논의 당시 기록은 보존, 실제로 다르게 한 부분만 표로 정리), [[architecture/admin-ingress-shared-alb]], [[troubleshooting/alb-ingressgroup-orphan-on-rename]] 신설
+- index.md 갱신
+
+---
+
+## [2026-08-11] 이채영 | troubleshooting | backend CI에 MySQL/Redis 서비스 컨테이너 추가
+
+`DemoApplicationTests.contextLoads()`가 CI 러너에 MySQL/Redis가 없어서 `RedisConnectionException`으로 실패하던 걸 GitHub Actions `services:` 블록(빈 MySQL 8.0/Redis 7 컨테이너, `application.yml` 로컬 기본값과 동일한 값)으로 해결. 실제 RDS/ElastiCache에 CI를 연결하는 방향도 검토했으나 네트워크 격리/데이터 오염 리스크/nightly-toggle 인프라 상태와의 결합 문제로 기각(사용자도 동의: "그냥 빈깡통으로 연결이 되는지 안되는지 테스트한다고 ㅇㅇ").
+
+- [[troubleshooting/backend-ci-missing-service-containers]] 신설
+
+---
+
+## [2026-08-11] 이채영 | decision | dev/Grafana/CD VPN 접근제어 — 논의만 하고 팀 상의 위해 보류
+
+IP 허용목록(`inbound-cidrs`)의 확장성 한계에서 시작해 VPN 도입을 논의. AWS Client VPN(비용 문제로 기각) vs WireGuard(bastion에 설치, 기울었음), 지금의 공개+IP제한 ALB vs internal ALB로 완전 비공개 전환(기울었음) 두 축을 검토했으나, 팀 전체 워크플로우에 영향을 주는 결정이라 사용자가 "팀원들이랑 더 상의를 해보고 결정해야할 사안"이라며 명시적으로 논의를 중단함.
+
+- [[decisions/2026-08-11-vpn-access-control-paused]] 신설 — 결정이 아니라 논의 스냅샷임을 문서 상단에 명시, 팀 결정 없이 임의로 재개하지 말 것을 남김
+- index.md 고아 페이지 섹션에 추가
+
+---
+
+## [2026-08-12] 이채영 | ingest | 이메일 발송 인프라(SQS+Lambda+SES) 구현
+
+팀원의 SES/SQS/Lambda 이메일 인증번호 발송 제안을 실제로 구현. 새 root(`05_messaging`) 대신 `04_data`에 `module "messaging"`으로 접붙이고(release/prod마다 큐/Lambda 분리 필요라는 점이 RDS/Redis와 같은 성격), SES 도메인 인증(계정당 1회만 가능)만 `03_registry`로 분리. Lambda 코드는 외부 빌드 스텝이 없는 순수 Node.js라 CI/S3 업로드 대신 Terraform `archive_file`로 로컬 zip 배포(처음엔 CI-built S3 zip을 권장했으나 코드 실체를 보고 단순화).
+
+- `modules/messaging` 신설(`sqs.tf`/`lambda.tf`/`iam.tf` — SQS 하나·ARN 하나로 좁힌 IAM, SES 발송권한도 도메인 identity ARN 하나로 제한), `03_registry/ses.tf` 신설(domain identity+DKIM)
+- Lambda 코드(`lambda-src/index.mjs`)를 팀원이 작성한 실제 코드로 교체 — 처음엔 화면 캡처가 잘려서 재구성한 placeholder였는데, 실제 코드를 받아보니 재구성 버전과 로직이 거의 동일했음
+- `03_registry` 첫 apply에서 SES가 이 코드 이전에 이미 콘솔 등으로 인증돼 있던 상태와 충돌(DKIM CNAME 3개 "already exists") — `terraform import`로 기존 레코드를 state에 편입해서 해결
+- Lambda 배포 중 `AWS_REGION`을 예약 env var로 직접 설정하려다 막힘(런타임 자동 주입값이라 직접 설정 불가) — `environment` 블록에서 제거
+- 사용자가 `runtime`을 `nodejs24.x`로 시도했으나 AWS provider(`~> 5.0`, 실제 5.100.0)가 v6.21.0 미만이라 client-side validation에서 막힘 확인 — 4개 root 전체가 얽힌 메이저 업그레이드라 사용자가 직접 진행하기로 함("내가 바꿔볼게")
+- 예매완료/결제내역 이메일 등 이후 이메일 종류를 늘릴 때는 새 큐/Lambda 대신 기존 것에 `type` 필드로 분기 추가하는 방향을 권장(인프라 리소스 추가 불필요) — 사용자가 직접 코드를 작성하겠다고 해서 실제 코드 변경은 안 함, 방식만 설명
+- [[architecture/messaging-infrastructure]], [[decisions/2026-08-12-messaging-infra-placement]], [[troubleshooting/ses-dkim-preexisting-records-import]], [[troubleshooting/lambda-env-var-and-runtime-version-gotchas]] 신설
+- index.md 갱신 — 콘솔에 남은 예전 `qket-email-verification-lambda` 정리 필요, end-to-end 발송 테스트 미완료, prod workspace 미적용을 고아 페이지 섹션에 추가
+
+---
+
 ## [2026-08-12] Claude Code | troubleshooting | 모니터링 스택 실제 구현 + Grafana-AMP 연동 미해결
 
 [[decisions/2026-08-11-monitoring-stack-design]]의 1차 범위 중 다수를 실제로 구현하고 검증함. 지표 영구저장은 문서상 방침(EBS)과 다르게 **AMP로 방향을 바꿈** — 이유는 아래 참고.

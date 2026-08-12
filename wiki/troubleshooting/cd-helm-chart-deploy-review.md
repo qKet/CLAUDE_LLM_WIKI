@@ -3,7 +3,7 @@ title: CD Helm 차트를 "실제로 배포하면 돌아가는지" 리뷰하며 �
 category: troubleshooting
 tags: [cd, helm, argocd, docker, backend, frontend]
 created: 2026-08-10
-updated: 2026-08-10
+updated: 2026-08-11
 ---
 
 # CD Helm 차트를 "실제로 배포하면 돌아가는지" 리뷰하며 찾은 문제들
@@ -25,6 +25,8 @@ env:
     value: "http://qket-backend-service"
 ```
 로 주석 해제 + 이름 수정. `path`는 안 붙임 — `next.config.js`가 destination 만들 때 이미 `/api/:path*`를 뒤에 붙이므로 여기서 `/api`까지 넣으면 `/api/api/...`로 겹친다.
+
+> ⚠️ 모순(2026-08-11): 이 `rewrites()` 프록시 방식 자체가 이후 실제 프로덕션 버그의 원인이 되어 **폐기됐다**. `next.config.js`의 `rewrites()`는 Next.js가 **빌드 타임에 값을 얼려서** 이미지에 굽는데, CD가 이미지를 재사용/재배포하는 흐름과 안 맞아 배포 시점 값이 반영 안 되는 문제가 실제로 발생함. 지금은 `/api/*`를 프론트 컨테이너가 프록시하지 않고 **ALB가 path 기반으로 직접 backend/frontend Ingress로 라우팅**한다(`kubernetes_ingress_v1.app_ingress_backend`/`app_ingress_frontend`, `02_k8s-addon/main.tf`) — 이 문서의 "해결"은 더 이상 실제 배포 방식이 아니다. 자세한 배경/대안은 [[decisions/2026-08-11-frontend-api-routing-alb-not-rewrites]] 참고.
 
 ## 문제 2: ArgoCD Application이 CD 레포의 존재하지 않는 경로를 가리키고 있었음
 
@@ -101,7 +103,7 @@ env:
 ```
 `helm template`로 렌더링 결과가 release 기준 `https://dev.jun979.click`로 정확히 나오는 것까지 확인함.
 
-> ⚠️ 미해결: OAuth 3사 client-id/secret 6개 + `TOSS_SECRET_KEY`는 팀이 각 서비스(Google/Kakao/Naver 개발자 콘솔, Toss 대시보드)에서 실제로 발급받은 값이 있어야 채울 수 있어서, 이번엔 손 안 댐. 값이 준비되면 db-secrets/redis-secrets와 같은 패턴(ESO가 Secrets Manager → K8s Secret으로 동기화, [[eks-destroy-layer-separation]] 참고)으로 새 Secret(예: `oauth-secrets`)을 만들고 `backend.secrets`에 추가하는 방향이 기존 아키텍처와 제일 맞는다 — 다만 이 값들은 RDS 비밀번호처럼 Terraform이 자동 생성하는 값이 아니라 사람이 발급받아 넣는 값이라, Secrets Manager 쪽 시드는 `TF_VAR_*` 환경변수나 gitignore된 tfvars로 채우는 방식이 필요함(평문으로 `.tf`에 커밋하면 안 됨).
+> ✅ 해결됨(2026-08-11): 예상대로 db-secrets/redis-secrets와 같은 ESO 패턴으로 풀었다. OAuth 3사 client-id/secret 6개 + `TOSS_SECRET_KEY` + `TOSS_CLIENT_KEY`(총 7개)를 담는 새 Secrets Manager 시크릿 `external_api`를 만들고(`modules/eso`), 콘솔에서 실제 발급값을 수동으로 채운 뒤 ESO `ExternalSecret`으로 `external-api-secrets` K8s Secret에 동기화 — `TOSS_CLIENT_KEY`만 backend가 안 쓰는 값이라 이 K8s Secret 동기화 대상에서 제외함(대신 프론트 CI가 직접 Secrets Manager에서 읽음, 아래 참고). 사람이 수동으로 채운 값이 자동 `terraform apply`로 빈 문자열에 덮어써지지 않도록 `lifecycle { ignore_changes = [secret_string] }`으로 보호.
 
 ## 재발 방지
 
@@ -111,5 +113,7 @@ env:
 
 ## 관련
 - [[decisions/2026-08-10-cd-writeback-github-app]]
+- [[decisions/2026-08-11-external-api-secrets-manager]]
+- [[decisions/2026-08-11-frontend-api-routing-alb-not-rewrites]]
 - [[eks-destroy-layer-separation]]
 - [[runbook/daily-infrastructure-toggle]]
