@@ -441,3 +441,13 @@ IP 허용목록(`inbound-cidrs`)의 확장성 한계에서 시작해 VPN 도입�
 - 예매완료/결제내역 이메일 등 이후 이메일 종류를 늘릴 때는 새 큐/Lambda 대신 기존 것에 `type` 필드로 분기 추가하는 방향을 권장(인프라 리소스 추가 불필요) — 사용자가 직접 코드를 작성하겠다고 해서 실제 코드 변경은 안 함, 방식만 설명
 - [[architecture/messaging-infrastructure]], [[decisions/2026-08-12-messaging-infra-placement]], [[troubleshooting/ses-dkim-preexisting-records-import]], [[troubleshooting/lambda-env-var-and-runtime-version-gotchas]] 신설
 - index.md 갱신 — 콘솔에 남은 예전 `qket-email-verification-lambda` 정리 필요, end-to-end 발송 테스트 미완료, prod workspace 미적용을 고아 페이지 섹션에 추가
+
+---
+
+## [2026-08-12] 이채영 | decision | 팀원이 공유한 "예매확정 알림 파이프라인" 아키텍처 노트 반영 (SQS vs SNS, EventBridge Scheduler 보류 근거)
+
+팀원이 claude.ai 아티팩트로 공유한 설계 문서("예매확정 알림 파이프라인: SQS·Lambda·SES")를 위키로 이관. 문서가 제안한 구조 부분(Lambda 전용 신규 레포, Infra `05_messaging` 신규 root)은 이미 확정된 [[decisions/2026-08-12-messaging-infra-placement]]와 달라서 **참고만 하고 따르지 않기로 함** — 대신 "왜 SQS→Lambda→SES 조합을 골랐는가"라는 아키텍처 선택 근거(동기 대신 비동기로 분리한 이유, SQS를 낀 이유, SNS 대신 SQS를 고른 이유, EventBridge Scheduler를 보류한 이유)만 뽑아서 정리함.
+
+- [[decisions/2026-08-12-sqs-lambda-ses-notification-pipeline]] 신설 — SQS vs SNS 비교표(pull/push, 단일소비자/fan-out, 재시도 방식), EventBridge Scheduler는 시간 기반 트리거 요구사항이 확정되기 전까진 안 만드는 게 맞다는 근거 포함
+- [[architecture/messaging-infrastructure]]에 SES 발신 도메인(`jun979.click`) 인증 현황 표 추가(DKIM/프로덕션 액세스 완료, DMARC는 Terraform 밖에서 설정된 상태라 나중에 SES DKIM 때와 같은 import 충돌 가능성 있음, **SPF는 아직 미등록**) + "의도적으로 특이한 지점"에 "Lambda가 아직 이메일 인증번호만 처리하고 예매확정 알림은 설계만 있다"는 현재 상태 명시
+- index.md 갱신 — SPF 미등록, EventBridge Scheduler 용도 확인 필요, Lambda의 예매확정 알림 미반영을 고아 페이지 섹션에 추가
