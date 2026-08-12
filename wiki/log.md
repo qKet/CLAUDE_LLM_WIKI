@@ -470,3 +470,13 @@ IP 허용목록(`inbound-cidrs`)의 확장성 한계에서 시작해 VPN 도입�
 - [[troubleshooting/grafana-amp-datasource-missing-auth-token]] 신설
 - index.md 갱신 (monitoring-stack-design 항목을 "구현 상당 부분 완료 + 남은 미해결" 상태로 업데이트, troubleshooting 목록에 신규 문서 추가)
 - `Infra` 레포 `feature/nyj` 브랜치에 커밋 — ServiceMonitor, 대시보드 ConfigMap, AMP remoteWrite 코드까지 push 완료(PR 리뷰 대기). Grafana-AMP 데이터소스 연동 코드(`additionalDataSources`)는 남겨뒀지만 아직 실제로는 안 됨
+
+---
+
+## [2026-08-12] 이채영 | ingest | 제출용 "기획서" 위키에 추가 (Obsidian PDF 내보내기용)
+
+`docs/cluadeDocs/기획서.md`로 먼저 작성했던 프로젝트 기획서(동기/배경, 2차 프로젝트 회고, 고도화 목표, 대기열 실측 데이터, 아키텍처, 실제 고도화 내역)를 사용자가 PDF로 뽑아야 한다며 위키로 옮겨달라고 요청. Obsidian이 이 위키 vault를 열어 쓰고 있다는 점(`.obsidian/` 확인됨)을 근거로, 별도 변환 도구 없이 **Obsidian 자체 "내보내기 → PDF"**로 바로 뽑을 수 있게 순수 마크다운(Mermaid 다이어그램 포함, Obsidian이 네이티브 렌더링)으로 작성.
+
+- 표준 6개 카테고리(conventions/architecture/decisions/troubleshooting/runbook/onboarding) 중 어디에도 안 맞는 문서라서, 위키 루트에 `기획서.md`로 두고 index.md에 "산출물(제출용 문서)" 섹션을 새로 만들어 예외로 등록
+- 내용 자체(동기/배경/기술적 근거)는 `docs/cluadeDocs/기획서.md`와 동일 — 포맷만 위키/Obsidian PDF 내보내기에 맞게 조정
+- 팀원 이름/역할/일정처럼 위키에 없는 정보는 `[ ]`로 표시해서 사용자가 직접 채우게 남김
