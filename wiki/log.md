@@ -460,3 +460,16 @@ IP 허용목록(`inbound-cidrs`)의 확장성 한계에서 시작해 VPN 도입�
 - [[troubleshooting/grafana-amp-datasource-missing-auth-token]] 신설
 - index.md 갱신 (monitoring-stack-design 항목을 "구현 상당 부분 완료 + 남은 미해결" 상태로 업데이트, troubleshooting 목록에 신규 문서 추가)
 - `Infra` 레포 `feature/nyj` 브랜치에 커밋 — ServiceMonitor, 대시보드 ConfigMap, AMP remoteWrite 코드까지 push 완료(PR 리뷰 대기). Grafana-AMP 데이터소스 연동 코드(`additionalDataSources`)는 남겨뒀지만 아직 실제로는 안 됨
+
+---
+
+## [2026-08-12] Claude Code | troubleshooting | Grafana-AMP 미해결 이슈 2차 조사 — 여전히 미해결, 업스트림 버그로 확정
+
+[[troubleshooting/grafana-amp-datasource-missing-auth-token]]를 사용자 요청으로 다시 팜. systematic-debugging 절차대로 새 가설 2개를 세우고 실제 클러스터에서 직접 검증함.
+
+- 가설 1(URL 끝 슬래시로 인한 이중 슬래시 경로 문제)을 `trimsuffix()`로 Terraform 코드까지 고쳐서 실제 적용·Pod 재시작까지 해봤으나 기각 — queryData는 그대로 실패, 오히려 기존에 통과하던 checkHealth까지 깨짐. 원래 값으로 원복함(현재 `Infra` 작업 트리는 커밋 상태와 동일, 실제 변경 없음)
+- 결정적 증거: SigV4 서명을 아예 안 붙인 요청이 플러그인의 실패와 **완전히 동일한 에러**를 냄 — 자격증명 문제가 아니라 애초에 `Authorization` 헤더 자체가 안 붙는 버그라는 게 사실상 확정됨
+- authType `ec2_iam_role` 옵션(Terraform 안 거치고 Grafana API로 임시 데이터소스 만들어 빠르게 검증)도 동일하게 실패 — `default`/`keys`/`ec2_iam_role` 3가지 인증 방식 전부 실패로 확인됨
+- GitHub 업스트림에서 정확히 같은 증상의 미해결 이슈([grafana-amazonprometheus-datasource#640](https://github.com/grafana/grafana-amazonprometheus-datasource/issues/640)) 발견 — Helm provisioning 환경의 알려진 버그이고, 유일한 workaround("Save and Test" 수동 클릭)는 우리처럼 readOnly provisioning인 경우 애초에 쓸 수 없음
+- 결론: 코드/설정으로 해결 불가능한 명확한 업스트림 버그. 더 이상 파는 것보다 플러그인 버전 교체나 SigV4 프록시 sidecar 같은 우회가 필요 — 문서에 다음 시도 후보로 남기고 이번엔 여기서 멈춤
+- [[troubleshooting/grafana-amp-datasource-missing-auth-token]] "추가 조사" 섹션과 결론 갱신

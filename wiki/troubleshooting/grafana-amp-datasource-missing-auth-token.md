@@ -33,22 +33,31 @@ unexpected response with status code 403: {"message":"Missing Authentication Tok
 5. **Grafana Pod 안에서 IRSA 환경변수 확인** (`AWS_ROLE_ARN`, `AWS_WEB_IDENTITY_TOKEN_FILE`) → 정상 주입됨.
 6. **진단용으로 IRSA 대신 access key 방식(`authType: keys`)의 임시 데이터소스를 새로 만들어서 같은 쿼리 시도** → **똑같이 `Missing Authentication Token`으로 실패**. IRSA든 access key든 자격증명 방식과 무관하게 동일하게 실패한다는 게 확인됨 — 이건 자격증명/권한 문제가 전혀 아니라는 뜻.
 
-## 결론
+## 추가 조사 (2026-08-12, 2차 — 더 파봄)
 
-**`grafana-amazonprometheus-datasource` v3.1.0 플러그인 자체의 버그(또는 이 버전에서의 알려진 제약)로 판단됨.** `checkHealth`는 통과하는데 실제 `queryData` 호출에서는 자격증명 종류와 무관하게 인증 헤더 자체를 안 붙이는 것으로 보임. IAM/IRSA/AMP API 쪽은 전부 정상 확인됐으므로, 우리 인프라 설정 문제가 아니라 플러그인 쪽 문제.
+첫 조사 이후 사용자가 "플러그인 버그 다시 파보자"고 해서 재조사함. systematic-debugging 절차대로 새 증거를 모으고 가설을 세워 하나씩 검증함.
+
+7. **URL 끝 슬래시(trailing slash) 가설 — 기각**: `amp_query_endpoint`(AWS가 주는 `prometheus_endpoint`)가 `.../ws-xxxx/`처럼 끝에 `/`가 붙어서 나오는데, 플러그인이 여기 `api/v1/query`를 이어붙이면 `//`(이중 슬래시)가 생겨서 API Gateway가 라우트를 못 찾는 것 아닌가 하는 가설을 세움. boto3로 이중 슬래시 URL에 정상 서명해서 요청해보니 **똑같이 403 Missing Authentication Token**이 나와서 처음엔 가설이 맞는 것처럼 보였음. 근데 실제로 Terraform에서 `trimsuffix()`로 슬래시를 제거하고 재적용(Pod 완전 재시작까지 포함)했더니 **queryData는 여전히 그대로 실패했고, 오히려 이전엔 통과하던 checkHealth까지 같이 깨짐**. 즉 이중 슬래시는 원인이 아니었고, "Missing Authentication Token"이라는 메시지 자체가 AWS API Gateway가 라우트 불일치든 인증 헤더 누락이든 가리지 않고 똑같이 반환하는 범용 에러라 우연히 같은 문구가 나온 것으로 판명. **원래 URL(끝 슬래시 있는 채)로 원복함.**
+8. **결정적 증거 — 인증 헤더를 아예 안 붙이고 요청**: boto3로 SigV4 서명을 전혀 안 하고 순수 `requests.get()`만 날려봤더니 **정확히 동일한 `403 Missing Authentication Token`**이 나옴. 이게 가장 직접적인 증거 — AWS가 "서명이 틀렸다"가 아니라 "서명 자체가 없다"고 말하는 상황이라는 뜻. 즉 플러그인의 `queryData` 요청에는 애초에 `Authorization` 헤더가 안 붙고 있을 가능성이 매우 높음.
+9. **authType `ec2_iam_role` 옵션도 시도 — 기각**: 플러그인 문서를 보니 인증 방식으로 `default`/`keys`/`credentials`/`ec2_iam_role` 4가지가 있고, 지금까지 `default`(IRSA로 될 줄 알았음)와 `keys`(access key)만 시도했었음. `ec2_iam_role`은 IRSA/EC2 인스턴스 프로파일용으로 별도 존재하길래 Terraform 안 거치고 Grafana API로 임시 데이터소스를 만들어 빠르게 테스트함 — **역시 동일하게 실패**(checkHealth 403, queryData Missing Auth Token). 이걸로 인증 방식 3가지(default/keys/ec2_iam_role) 전부 동일 실패 확인.
+10. **업스트림에 이미 보고된 알려진 버그 발견**: GitHub `grafana/grafana-amazonprometheus-datasource` 저장소의 [Issue #640](https://github.com/grafana/grafana-amazonprometheus-datasource/issues/640) — 제목이 정확히 "Missing Authentication Token until 'Save and Test' is Selected". **Helm으로 프로비저닝한 데이터소스에서 우리와 똑같은 증상**을 겪고 있고(UI에서 수동으로 "Save and Test"를 누르면 그때만 해결되는데, 우리처럼 `additionalDataSources`로 provisioning하면 UI 편집 자체가 막혀있어서 이 workaround를 쓸 수가 없음), 이슈는 **아직 미해결(Waiting) 상태**로 남아있음. 즉 우리 환경 특이 문제가 아니라 플러그인 자체의 알려진 미해결 버그.
+
+## 결론 (갱신)
+
+**`grafana-amazonprometheus-datasource` v3.1.0의 확실한 업스트림 버그.** `queryData` 요청에 SigV4 `Authorization` 헤더가 아예 안 붙는 것으로 보이며(인증 헤더 없이 보낸 요청과 완전히 동일한 에러), 이는 인증 방식(default/keys/ec2_iam_role)이나 URL 형식과 무관하게 항상 발생함. GitHub Issue #640에서 동일 증상이 이미 보고돼 있고, 유일하게 알려진 workaround("Save and Test" 수동 클릭)는 Helm/Terraform으로 provisioning하는 우리 방식(`readOnly: true`)에서는 애초에 적용 불가능. **코드/설정만으로는 해결 불가 — 플러그인 쪽 수정을 기다리거나 다른 접근이 필요.**
 
 ## 현재 상태 / 임시 조치
 
 - **데이터 자체는 안전함** — `remoteWrite`는 정상 작동 중이라 Prometheus가 수집한 지표는 AMP에 계속 쌓이고 있고, EKS를 destroy/재생성해도 안 없어짐.
-- **Grafana에서 AMP를 직접 조회하는 것만 아직 안 됨** — 지금 당장 과거 데이터를 봐야 하면 AWS 콘솔의 AMP 쿼리 화면에서 직접 PromQL로 조회 가능.
-- 관련 Terraform 코드(`modules/monitoring`의 `additionalDataSources` 설정, `iam.tf`의 `grafana_amp_query` 정책)는 그대로 남겨둠 — 플러그인 버전을 바꾸거나 문제가 해결되면 바로 쓸 수 있는 상태.
+- **Grafana에서 AMP를 직접 조회하는 것만 아직 안 됨** — 지금 당장 과거 데이터를 봐야 하면, 콘솔에 직접 조회 화면이 없으므로(2026-08-12 확인 — CloudWatch와 다르게 AMP 콘솔엔 PromQL 브라우저가 없음) boto3 등으로 SigV4 서명한 스크립트를 사용해야 함.
+- 관련 Terraform 코드(`modules/monitoring`의 `additionalDataSources` 설정, `iam.tf`의 `grafana_amp_query` 정책)는 그대로 남겨둠 — 문제가 해결되면 바로 쓸 수 있는 상태. **URL은 끝 슬래시 있는 원래 형태(`aws_prometheus_workspace.prometheus_endpoint` 그대로)로 유지 — 이게 checkHealth가 통과하던 유일한 형태였음.**
 
 ## 다음에 시도해볼 것
 
-- 플러그인 버전 다운그레이드/업그레이드 (`grafana.plugins`에 버전 명시: `grafana-amazonprometheus-datasource X.Y.Z`)
-- GitHub의 `grafana-amazonprometheus-datasource` 이슈 트래커에서 같은 증상(`Missing Authentication Token` on queryData) 검색
-- Grafana 자체 버전을 올려서 재시도 (지금 kube-prometheus-stack 기본 번들 버전 확인 필요)
-- 최후 수단: AMP 앞단에 SigV4 서명을 대신 처리해주는 간단한 프록시(sidecar)를 두는 방법
+- GitHub Issue #640에 우리 사례(readOnly provisioning이라 workaround 자체가 불가능하다는 점)를 코멘트로 남기고 업스트림 수정 기다리기
+- 플러그인 버전 다운그레이드 (`grafana.plugins`에 `grafana-amazonprometheus-datasource 3.0.x` 등 구버전 명시) — 이 버그가 3.1.0에서 새로 생긴 회귀(regression)일 가능성 확인
+- 최후 수단: AMP 앞단에 SigV4 서명을 대신 처리해주는 간단한 프록시(sidecar)를 두고, Grafana는 그 프록시를 일반 `prometheus` 타입으로 바라보게 하는 방법 — 사실상 AWS 플러그인을 우회
 
 ## 관련
 - [[../decisions/2026-08-11-monitoring-stack-design]]
+- [GitHub Issue #640](https://github.com/grafana/grafana-amazonprometheus-datasource/issues/640) — 동일 증상의 업스트림 미해결 이슈
