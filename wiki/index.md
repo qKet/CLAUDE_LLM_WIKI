@@ -39,6 +39,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[2026-08-11-frontend-ci-toss-key-secrets-manager]] — 프론트 CI 빌드 시점 `NEXT_PUBLIC_TOSS_CLIENT_KEY`를 GitHub Secrets 대신 Secrets Manager에서 OIDC로 직접 fetch
 - [[2026-08-11-vpn-access-control-paused]] — dev/Grafana/CD VPN 접근제어 논의(WireGuard+internal ALB 방향으로 기울었으나 팀 상의 필요해 보류, 결정 아님)
 - [[2026-08-12-messaging-infra-placement]] — 이메일 발송 인프라를 새 root 대신 `04_data`+`03_registry`에 배치, Lambda를 CI 없이 로컬 zip으로 배포
+- [[2026-08-12-sqs-lambda-ses-notification-pipeline]] — 예매확정/취소 알림 파이프라인으로 SQS→Lambda→SES 채택(SNS/EventBridge Scheduler 대신) 근거 — 팀원 공유 아키텍처 노트 기반, 레포 분리/`05_messaging` root 제안은 참고만 하고 안 따름
 
 ## troubleshooting/ — 실제 겪은 버그
 - [[null-field-partial-update-bug]] — nullable FK 부분 업데이트 버그 (백/프론트 양쪽)
@@ -82,5 +83,8 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - 콘솔에서 예전에 수동으로 만들어져 있던 `qket-email-verification-lambda`(Terraform 미관리) — 새 Terraform 관리 함수(`team5-qket-email-verification-release`)가 정상 동작 확인되면 정리 필요
 - `nodejs24.x`를 쓰려면 AWS provider `~> 5.0` → v6.21.0+ 메이저 업그레이드가 필요함(4개 root 전부 영향) — 아직 안 함, 당장은 `nodejs22.x`로 유지 중. [[lambda-env-var-and-runtime-version-gotchas]] 참고
 - 이메일 발송 인프라(`external_api`, `messaging`)는 release workspace에만 apply됨 — prod workspace는 아직 한 번도 적용 안 함
+- SES 발신 도메인(`jun979.click`)에 SPF TXT 레코드가 아직 없음 — `v=spf1 include:amazonses.com ~all` 추가 필요, 담당자 미지정 ([[architecture/messaging-infrastructure]] 참고)
+- Lambda 코드가 아직 이메일 인증번호(`{ email, code }`)만 처리 — 예매확정/취소 알림(`type` 필드 분기)은 설계만 있고 실제 코드 반영은 안 됨
+- EventBridge Scheduler를 이미 만들어둔 팀원이 있다는 메모가 있음 — 실제 용도(리마인더 등) 확인 필요, 확정된 요구사항이 없다면 정리 대상인지 판단 필요 ([[decisions/2026-08-12-sqs-lambda-ses-notification-pipeline]] 참고)
 - 프론트 CI의 Toss 키 fetch가 `team5-qket-external-api-release` 이름으로 하드코딩됨 — prod CI 파이프라인을 만들 때 반드시 갱신 필요 ([[decisions/2026-08-11-frontend-ci-toss-key-secrets-manager]] 참고)
 - [[decisions/2026-08-11-frontend-api-routing-alb-not-rewrites]]로 배포 환경 라우팅은 바뀌었지만, 로컬 개발(`npm run dev`) 환경에서 `/api` 프록시를 어떻게 처리할지는 아직 정리 안 됨(온보딩 문서에도 미반영)

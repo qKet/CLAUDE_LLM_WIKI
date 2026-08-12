@@ -10,7 +10,7 @@ updated: 2026-08-12
 
 ## 구조 / 요약
 
-이메일 인증번호(현재) / 예매완료·결제내역(예정) 발송을 위한 큐+함수 조합. backend가 SQS에 메시지를 넣으면 Lambda가 트리거되어 SES로 실제 발송한다 — backend가 SES를 직접 호출하지 않고 큐를 거치는 이유는 SES 호출 실패/지연이 결제·예매 같은 핵심 흐름의 응답 시간에 영향을 안 주게 하기 위함(비동기 분리).
+이메일 인증번호(현재) / 예매완료·결제내역(예정) 발송을 위한 큐+함수 조합. backend가 SQS에 메시지를 넣으면 Lambda가 트리거되어 SES로 실제 발송한다 — backend가 SES를 직접 호출하지 않고 큐를 거치는 이유는 SES 호출 실패/지연이 결제·예매 같은 핵심 흐름의 응답 시간에 영향을 안 주게 하기 위함(비동기 분리). **왜 SQS/Lambda/SES라는 조합 자체를 골랐는지(SNS·EventBridge Scheduler와 비교)**는 별도 문서 [[../decisions/2026-08-12-sqs-lambda-ses-notification-pipeline]] 참고 — 이 문서는 "지금 이렇게 되어있다"만 다룬다.
 
 ```
 backend → SQS(email_verification) → Lambda(email_verification) → SES → 실제 메일함
@@ -44,8 +44,24 @@ backend → SQS(email_verification) → Lambda(email_verification) → SES → �
 
 새 SQS 큐·Lambda를 또 만들 필요 없이, **기존 큐/Lambda를 재사용하고 메시지에 `type` 필드로 분기**하는 방향을 권장(인프라 리소스 추가 없이 `index.mjs` 코드 수정만으로 끝남). SES 발송 권한도 이미 도메인 단위로 열려 있어서 이메일 종류가 늘어나는 것과 무관하다.
 
+## SES 발신 도메인(`jun979.click`) 인증 현황
+
+| 항목 | 상태 |
+|---|---|
+| DKIM | ✅ CNAME 3개 등록 완료 — `03_registry/ses.tf`의 `aws_ses_domain_dkim`/`aws_route53_record.ses_dkim`이 관리. 발신 서명 인증 |
+| DMARC | ✅ TXT 등록 완료 — 현재 모니터링 모드(`p=none`), Terraform 코드 밖에서(수동으로) 설정된 것으로 보임 — 아직 이 레코드를 관리하는 `.tf` 리소스가 없음 |
+| SPF | ⚠️ **미등록** — 루트 도메인 TXT에 `v=spf1 include:amazonses.com ~all` 추가 필요. 미해결 액션 아이템 |
+| MAIL FROM | 선택 사항 — 없어도 발송 자체는 가능, 추후 정렬률(alignment) 개선용 |
+| SES 프로덕션 액세스 | ✅ 승인 완료 — 샌드박스 해제, 검증 안 된 임의 수신자에게도 발송 가능 |
+
+## 의도적으로 어색하거나 특이한 지점
+
+- Lambda 코드가 지금 실제로 처리하는 메시지 스펙은 `{ email, code }`(이메일 인증번호)뿐이다 — 예매확정/취소 알림([[../decisions/2026-08-12-sqs-lambda-ses-notification-pipeline]]이 다루는 유스케이스)은 아직 코드로 연결 안 됨. 위 "확장하는 방법"대로 `type` 필드 분기를 추가하면 같은 큐/Lambda로 처리 가능하지만, 실제 반영은 아직 안 됐다.
+- DMARC 레코드가 Terraform 밖에서 설정된 것으로 보여 `terraform plan`에 안 잡힌다 — 나중에 이 도메인의 다른 레코드를 Terraform으로 관리하려 할 때 SES DKIM 때 겪은 것과 같은 "already exists" 충돌([[../troubleshooting/ses-dkim-preexisting-records-import]])이 재현될 수 있다는 걸 미리 인지해둘 것.
+
 ## 관련
 - [[../decisions/2026-08-12-messaging-infra-placement]]
+- [[../decisions/2026-08-12-sqs-lambda-ses-notification-pipeline]]
 - [[../troubleshooting/ses-dkim-preexisting-records-import]]
 - [[../troubleshooting/lambda-env-var-and-runtime-version-gotchas]]
 - [[terraform-platform-workload-split]]
