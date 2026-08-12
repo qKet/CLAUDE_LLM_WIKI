@@ -355,3 +355,22 @@ ALB Controller로 ALB는 생기는데 `dev.jun979.click`/`app.jun979.click` 같�
 - 2차 범위(나중): 비즈니스 지표(예매/결제), 비용 모니터링(오늘 겪은 고아 리소스 과금 감시), 분산 트레이싱
 - [[decisions/2026-08-11-monitoring-stack-design]] 신설
 - index.md 갱신 — 오늘 실제로 겪은 ALB destroy 순서/kubectl_manifest finalizer/webhook 레이스/ExternalDNS TXT 소유권 문제들이 아직 troubleshooting 문서로 안 남겨진 것도 고아 페이지 섹션에 표시해둠(추후 정리 필요)
+
+---
+
+## [2026-08-12] Claude Code | troubleshooting | 모니터링 스택 실제 구현 + Grafana-AMP 연동 미해결
+
+[[decisions/2026-08-11-monitoring-stack-design]]의 1차 범위 중 다수를 실제로 구현하고 검증함. 지표 영구저장은 문서상 방침(EBS)과 다르게 **AMP로 방향을 바꿈** — 이유는 아래 참고.
+
+**구현 완료**
+1. `module.monitoring` 실제 apply (kube-prometheus-stack)
+2. backend API 지표 ServiceMonitor 추가(release만) — Service에 `spec.selector`만 있고 `metadata.labels`가 없어서 Prometheus가 discover는 해도 relabel 단계에서 계속 drop하던 문제를 겪음. ServiceMonitor의 selector는 Service의 selector가 아니라 Service 자체의 라벨을 본다는 걸 몰라서 헤맴 — `CD` 레포의 Service 템플릿에 라벨 추가로 해결
+3. 대시보드를 git(ConfigMap)에 저장해서 EKS 재생성에도 자동 복구되게 함(`sidecar.dashboards`) — 실제로 Pod 재시작 후 자동 복구 확인함(단, Grafana 계정/비밀번호 같은 SQLite 데이터는 여전히 초기화됨 — 별개 문제)
+4. **지표 영구저장 방식을 EBS에서 AMP로 변경**: EBS(PVC)는 StorageClass `ReclaimPolicy: Delete`라 EKS destroy 시 PVC와 함께 볼륨도 삭제돼서 "클러스터 재생성에도 데이터 유지"라는 목표 자체를 못 푸는 걸 확인함(Pod 재시작에는 강하지만 클러스터 재생성에는 무력) — AMP는 EKS와 완전히 분리된 관리형 서비스라 이 문제 자체가 없음. `01_infrastructure`에 `aws_prometheus_workspace` + IRSA 신설, `remoteWrite` 검증(`prometheus_remote_storage_samples_total` 33만 건+, 실패 0건)
+5. 적용 중 겪은 공통 패턴: **Helm 값만 바뀌고 Pod 스펙(ServiceAccount annotation 등)이 안 바뀌면 Helm이 Pod를 자동 재시작 안 시킴** — IRSA 자격증명은 Pod 생성 시점에만 주입되므로, ServiceAccount annotation 변경 후 Pod를 수동으로 delete해서 재생성해야 실제로 반영됨. env var 변경은 Pod spec 자체가 바뀌어서 자동 롤아웃됨(대조적).
+
+**미해결로 남김**: [[troubleshooting/grafana-amp-datasource-missing-auth-token]] — Grafana가 AMP에 remoteWrite는 잘 하는데, 그 데이터를 Grafana에서 직접 조회하는 것 자체가 안 됨. AMP API/IAM 권한은 수동 boto3 서명 테스트로 정상 확인했고, IRSA와 access key 둘 다 동일하게 실패하는 것까지 확인해서 자격증명 문제가 아니라 `grafana-amazonprometheus-datasource` 플러그인(v3.1.0) 자체의 버그로 결론. 사용자와 상의 후 "일단 여기서 멈추고 이슈로 기록"하기로 함 — 데이터는 AMP에 안전하게 쌓이고 있어서 급한 문제는 아님.
+
+- [[troubleshooting/grafana-amp-datasource-missing-auth-token]] 신설
+- index.md 갱신 (monitoring-stack-design 항목을 "구현 상당 부분 완료 + 남은 미해결" 상태로 업데이트, troubleshooting 목록에 신규 문서 추가)
+- `Infra` 레포 `feature/nyj` 브랜치에 커밋 — ServiceMonitor, 대시보드 ConfigMap, AMP remoteWrite 코드까지 push 완료(PR 리뷰 대기). Grafana-AMP 데이터소스 연동 코드(`additionalDataSources`)는 남겨뒀지만 아직 실제로는 안 됨

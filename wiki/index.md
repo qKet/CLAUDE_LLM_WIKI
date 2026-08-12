@@ -42,6 +42,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[eks-provider-auth]] — kubernetes/helm/kubectl provider의 EKS 인증 실패 (토큰 만료 + role-arn 누락)
 - [[eks-destroy-layer-separation]] — EKS destroy 시 K8s addon 정리 실패 종합 정리 + Layer 1(infrastructure)/Layer 2(k8s-addon) 분리 해법 (구현 완료)
 - [[cd-helm-chart-deploy-review]] — CD Helm 차트 실동작 리뷰에서 찾은 문제 4가지(frontend 백엔드 주소 누락, ArgoCD path 오류, frontend Dockerfile 중복 빌드, backend 필수 env var 누락) — OAuth/Toss 시크릿은 실제 발급값 필요해서 미해결
+- [[grafana-amp-datasource-missing-auth-token]] — Grafana의 `grafana-amazonprometheus-datasource` 플러그인이 쿼리 요청에 인증 헤더를 안 붙이는 문제(IRSA/access key 둘 다 동일 실패, AMP API/IAM은 정상 확인됨) — **미해결**, remoteWrite(데이터 저장)는 정상 작동 중
 
 ## runbook/ — 반복 운영 절차
 - [[db-schema-change]] — 로컬 DB 스키마 변경 절차 2가지
@@ -61,5 +62,5 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - ESO(External Secrets Operator)만 여전히 `Infra/backup/`에 보류 중 — ALB Controller는 2026-08-10에 `02_k8s-addon`으로 재활성화 완료
 - [[cd-helm-chart-deploy-review]]의 OAuth 3사(Google/Kakao/Naver) client-id/secret + `TOSS_SECRET_KEY`가 CD 차트에 안 연결돼 있음 — 실제 발급값이 준비되면 ESO 패턴으로 새 Secret 추가 필요
 - prod용 ArgoCD Application이 아직 없음 — release용(`Infra/argocd/qket-cd-app.yaml`)만 있고, prod는 `valueFiles: [values.yaml, values-prod.yaml]` 레이어링이 필요함 ([[cd-helm-chart-deploy-review]] 참고)
-- [[decisions/2026-08-11-monitoring-stack-design]] 실제 구현 안 됨(설계만 논의) — 알림 채널(Slack/이메일) 미정, 지표용 EBS의 AZ 고정/node affinity 코드 미작성
+- [[decisions/2026-08-11-monitoring-stack-design]] 중 상당 부분 구현됨(2026-08-12): `module.monitoring`(kube-prometheus-stack) 실제 apply, backend ServiceMonitor(release만), 대시보드 git+ConfigMap 영구저장, 지표는 EBS 대신 **AMP**(Amazon Managed Prometheus)로 방향 전환해서 영구저장까지 완료(remoteWrite 검증됨). 남은 미해결: Grafana→AMP 직접 조회([[troubleshooting/grafana-amp-datasource-missing-auth-token]]), 알림 채널(Slack/이메일) 미정, Loki(로그) 미구현
 - 2026-08-11에 `02_k8s-addon` 실제 apply/destroy 중 겪은 문제들(ALB Controller destroy 순서, kubectl_manifest가 finalizer를 안 기다리는 문제, ArgoCD/ExternalDNS와 ALB Controller의 webhook 레이스, ExternalDNS TXT 소유권 없는 수동 레코드 방치)이 아직 troubleshooting 문서로 안 남겨짐 — 필요하면 추가 정리 예정
