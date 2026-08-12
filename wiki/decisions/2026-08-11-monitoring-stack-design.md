@@ -1,13 +1,16 @@
 ---
 title: 모니터링 스택 설계 (Prometheus/Grafana/Loki)
 category: decisions
-status: 논의중
+status: 확정 (범위 축소해서 구현 완료)
 date: 2026-08-11
 author: 이채영
 tags: [monitoring, prometheus, grafana, loki, k8s-addon]
+updated: 2026-08-11
 ---
 
 # 모니터링 스택 설계 (Prometheus/Grafana/Loki)
+
+> ✅ 2026-08-11: 아래 설계 논의 이후 실제로 구현까지 끝냈다. 단, 구현하면서 **Loki(로그)는 이번 범위에서 뺐고**, Grafana 노출 방식도 "포트포워딩만"에서 **IP 허용목록 Ingress(공개 도메인)**로 바뀌었다 — 이유는 맨 아래 "구현 결과 (실제로 한 것)" 섹션 참고. 아래 "결정" 표는 **논의 당시 기록을 그대로 보존**한 것이고, 실제로 무엇을 했는지는 새 섹션에 따로 정리했다.
 
 ## 배경
 
@@ -49,13 +52,29 @@ tags: [monitoring, prometheus, grafana, loki, k8s-addon]
 8. 비용 모니터링(Kubecost 또는 AWS Cost Explorer 연동) — 오늘 겪은 "고아 리소스가 조용히 과금되는" 상황을 감시
 9. 분산 트레이싱(Tempo) — 지금 구조가 단순해서 우선순위 낮음, Grafana LGTM 스택에 자연스럽게 추가 가능
 
-## 트레이데오프 / 남은 리스크
+## 트레이데오프 / 남은 리스크 (논의 당시 기록)
 
 - **미해결**: 알림 채널(Slack vs 이메일) — 팀의 실제 소통 수단 확인 후 결정 필요
 - **미해결**: 지표(Prometheus TSDB)용 EBS 볼륨의 AZ 고정 + node affinity 설정 — 설계만 논의, 실제 Terraform 코드는 아직 안 씀
 - **미해결**: `03_registry`라는 이름이 "로그/지표 영구 저장소"라는 실제 역할과 안 맞음 — 기능상 문제는 없지만 나중에 팀이 헷갈릴 수 있음(리네임하면 상태 마이그레이션 필요해서 지금은 보류)
 - 아직 코드 구현은 전혀 안 됨 — 이 문서는 설계 논의만 정리한 것, 다음 단계는 실제 `02_k8s-addon`/`03_registry` Terraform 코드 작성
 
+## 구현 결과 (실제로 한 것, 2026-08-11)
+
+논의에서 정한 1차 범위 중 **클러스터 지표 + DB CloudWatch 연동 + Grafana 노출**만 먼저 구현했고, 나머지(Loki 로그, Blackbox 외부 헬스체크, ALB 에러율, 배포 annotation)는 다음 단계로 미뤘다.
+
+| 항목 | 논의 때 결정 | 실제로 한 것 | 왜 달라졌나 |
+|---|---|---|---|
+| 지표 수집/시각화 | `kube-prometheus-stack` | 그대로 `kube-prometheus-stack`(`modules/monitoring`, `02_k8s-addon`) | 변경 없음 |
+| DB 상태 | Grafana + CloudWatch 데이터소스 | 그대로 — `modules/monitoring/iam.tf`가 Grafana ServiceAccount에 CloudWatch 읽기 전용 IRSA Role을 붙임(`grafana.serviceAccount.name="grafana"` 고정 + IRSA 애노테이션) | 변경 없음 |
+| 로그 저장(Loki) | S3 백엔드, `03_registry`에 버킷 | **이번 범위에서 뺌** — 아직 코드 없음 | 지표+DB 연동만으로도 당장 겪은 문제(오늘의 orphan 리소스, ExternalDNS 문제 등)의 상당수는 대응 가능하다고 판단, Loki(+Promtail DaemonSet, S3 백엔드 설계)까지 한 번에 하면 범위가 너무 커져서 별도 스텝으로 분리 |
+| Grafana 접속 방법 | 포트포워딩만, 공개 도메인 노출 안 함 | **공개 도메인(`grafana.jun979.click`) + IP 허용목록 Ingress**로 노출 | 포트포워딩은 매번 `kubectl port-forward`를 켜놔야 해서 팀원들이 쓰기 불편하다는 실사용 이슈로 방향 전환. 대신 인증 강화가 안 된 상태에서 완전 공개는 여전히 위험하다고 판단해 ALB `inbound-cidrs`로 팀 IP만 허용하는 절충안 채택 — 자세한 구조는 [[../architecture/admin-ingress-shared-alb]] |
+| ArgoCD와의 관계 | 언급 없음(모니터링 논의 당시 ArgoCD UI는 이미 별도 노출 중이었음) | **Grafana와 ArgoCD를 하나의 공유 ALB**(`group.name = "qket-admin"`)에 묶고, 같은 IP 허용목록을 재사용 | ALB Ingress의 IP 제한(`inbound-cidrs`)이 Ingress 오브젝트 단위가 아니라 **공유 보안그룹(IngressGroup) 단위**로 적용된다는 걸 확인 — 관리자용 두 서비스를 나눠서 ALB 2개로 각자 관리하는 것보다, 하나로 합쳐서 허용 IP 목록을 한 곳에서만 관리하는 게 실수 여지가 적다고 판단(처음엔 따로 만들었다가 나중에 합침) |
+
+지표(Prometheus TSDB)용 EBS의 AZ 고정/node affinity, Blackbox Exporter, ALB 에러율 CloudWatch 연동, 배포 annotation, Loki, 알림 채널(Slack/이메일)은 **여전히 미해결** — 위 표의 "논의 당시 기록"에 있는 2차 범위 그대로 유효하다.
+
 ## 관련
 - [[../troubleshooting/eks-destroy-layer-separation]]
 - [[../troubleshooting/cd-helm-chart-deploy-review]]
+- [[../architecture/admin-ingress-shared-alb]]
+- [[2026-08-11-vpn-access-control-paused]]
