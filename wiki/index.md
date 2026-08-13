@@ -28,6 +28,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[terraform-platform-workload-split]] — infrastructure(공유)/data(workspace) 2-root 구조(구 platform/workload), env_config 패턴, nightly-off 상태를 방어하는 `try()` 패턴
 - [[admin-ingress-shared-alb]] — Grafana+ArgoCD IP 허용목록 공유 ALB, IngressGroup이 `inbound-cidrs`/`healthcheck-path`를 적용하는 단위
 - [[messaging-infrastructure]] — 이메일 발송(SQS+Lambda+SES) 구조, root 배치, Lambda 배포 방식
+- [[keda-autoscaling]] — backend KEDA 오토스케일링 구조(엔진은 Infra/Terraform, ScaledObject는 CD/Helm), metrics-server 전제조건, ArgoCD `ignoreDifferences`로 replicas 충돌 방지
 
 ## decisions/ — "왜 이렇게 하기로 했나" (ADR)
 - [[README]] — 사용법/템플릿
@@ -60,6 +61,9 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[ses-dkim-preexisting-records-import]] — `03_registry` 첫 apply에서 SES DKIM CNAME이 이미 존재해 실패, `terraform import`로 기존 레코드를 state에 편입
 - [[lambda-env-var-and-runtime-version-gotchas]] — Lambda 예약 환경변수(`AWS_REGION`) 직접 설정 불가, `nodejs24.x`는 AWS provider v6.21.0+ 필요(현재 `~> 5.0` 고정이라 업그레이드 전까지 `nodejs22.x` 사용)
 - [[grafana-amp-datasource-missing-auth-token]] — Grafana의 `grafana-amazonprometheus-datasource` 플러그인이 쿼리 요청에 인증 헤더를 안 붙이는 문제(IRSA/access key 둘 다 동일 실패, AMP API/IAM은 정상 확인됨) — **미해결**, remoteWrite(데이터 저장)는 정상 작동 중
+- [[keda-scaling-missing-metrics-server]] — 부하테스트에서 KEDA(CPU 트리거)가 전혀 스케일 안 함, 원인은 클러스터에 `metrics-server` 자체가 없었던 것(HPA Condition까지 봐야 드러남) — 설치로 해결, replica 4→8 실제 증가 검증
+- [[hikaricp-connection-storm-load-test]] — 부하테스트만 돌리면 ArgoCD/Grafana까지 같이 멈춤, 원인은 RDS가 아니라 HikariCP 풀 과다(40×8replica=320)로 인한 커넥션 생성 시 CPU 폭증이 버스터블(t3.medium) 노드의 CPU 크레딧을 고갈시켜 같은 노드의 다른 파드까지 굶긴 것 — 풀 사이즈 축소로 해결
+- [[backend-cpu-throttling-and-scaling-load-test]] — backend CPU 스로틀링 2단계: 1차는 CPU limit 자체가 작아서(250m/1) 상향으로 해결(500m/2), 2차는 limit 상향 후에도 순간 스로틀링이 남아있는데 KEDA는 정상적으로 안 늘리는 상황을 관찰 — "스로틀링≠평균 사용률" 구조를 확인하고 replica 증설 대신 limit 추가 상향을 권고(**미적용**, 사용자 판단 대기)
 
 ## runbook/ — 반복 운영 절차
 - [[db-schema-change]] — 로컬 DB 스키마 변경 절차 2가지
@@ -91,3 +95,5 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - EventBridge Scheduler를 이미 만들어둔 팀원이 있다는 메모가 있음 — 실제 용도(리마인더 등) 확인 필요, 확정된 요구사항이 없다면 정리 대상인지 판단 필요 ([[decisions/2026-08-12-sqs-lambda-ses-notification-pipeline]] 참고)
 - 프론트 CI의 Toss 키 fetch가 `team5-qket-external-api-release` 이름으로 하드코딩됨 — prod CI 파이프라인을 만들 때 반드시 갱신 필요 ([[decisions/2026-08-11-frontend-ci-toss-key-secrets-manager]] 참고)
 - [[decisions/2026-08-11-frontend-api-routing-alb-not-rewrites]]로 배포 환경 라우팅은 바뀌었지만, 로컬 개발(`npm run dev`) 환경에서 `/api` 프록시를 어떻게 처리할지는 아직 정리 안 됨(온보딩 문서에도 미반영)
+- [[troubleshooting/backend-cpu-throttling-and-scaling-load-test]]의 2차 권고(backend CPU limit을 2→3~4로 추가 상향) — 아직 `CD/helm/values.yaml`에 미반영, 사용자 판단 대기 중
+- `Infra` PR #15(`feature/nyj`, 모니터링/AMP 작업)가 merge conflict 해결 완료로 `MERGEABLE` 상태까지 갔지만 아직 `dev`로 실제 merge는 안 됨 — 나윤준님 직접 확인 후 merge할지, 바로 merge할지 미결정

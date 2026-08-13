@@ -493,3 +493,17 @@ IP 허용목록(`inbound-cidrs`)의 확장성 한계에서 시작해 VPN 도입�
 - GitHub 업스트림에서 정확히 같은 증상의 미해결 이슈([grafana-amazonprometheus-datasource#640](https://github.com/grafana/grafana-amazonprometheus-datasource/issues/640)) 발견 — Helm provisioning 환경의 알려진 버그이고, 유일한 workaround("Save and Test" 수동 클릭)는 우리처럼 readOnly provisioning인 경우 애초에 쓸 수 없음
 - 결론: 코드/설정으로 해결 불가능한 명확한 업스트림 버그. 더 이상 파는 것보다 플러그인 버전 교체나 SigV4 프록시 sidecar 같은 우회가 필요 — 문서에 다음 시도 후보로 남기고 이번엔 여기서 멈춤
 - [[troubleshooting/grafana-amp-datasource-missing-auth-token]] "추가 조사" 섹션과 결론 갱신
+
+---
+
+## [2026-08-13] Claude Code | troubleshooting | 부하테스트/모니터링 기반 트러블슈팅 3건 정리 (KEDA·metrics-server, HikariCP 커넥션 폭풍, CPU 스로틀링 vs 오토스케일링)
+
+k6 부하테스트를 실제로 돌리면서 Grafana/Prometheus/CloudWatch/`kubectl` 지표로 잡아낸 문제 3건을 문서화. 전부 "겉으로 보이는 증상"과 "실제 원인"이 다른 층위에 있던 케이스라 진단 과정 자체를 상세히 남김.
+
+1. **KEDA가 CPU 트리거를 걸어도 전혀 스케일 안 함** — `kubectl get hpa`가 `<unknown>/70%`로 멈춰있었는데, `kubectl describe hpa`의 Condition까지 봐야 `metrics-server` 자체가 클러스터에 없다는 게 드러남. 설치 후 replica가 4→8까지 실제로 늘어나는 것까지 검증.
+2. **부하테스트만 돌리면 관련 없는 ArgoCD/Grafana까지 같이 멈춤** — RDS CloudWatch 지표(CPU 9%, 연결 51~61)는 멀쩡해서 처음엔 원인불명이었으나, HikariCP 풀 과다 설정(40×8replica=320)으로 인한 "커넥션 생성" 자체의 CPU 비용이 버스터블(t3.medium) 노드의 CPU 크레딧을 노드 단위로 고갈시켜 같은 노드의 다른 파드까지 굶긴 것으로 확인. 풀 사이즈 축소로 해결.
+3. **CPU 스로틀링 2단계 진단** — 1차는 CPU limit이 작아서(250m/1) 상향(500m/2)으로 해결. 2차는 자가진단용으로 새로 추가한 Grafana 패널(pod별 CPU 스로틀링, 노드 CPU 사용률)로 재관찰한 결과, limit 상향 후에도 순간 스로틀링은 남아있는데 KEDA는 "정상적으로" 안 늘리고 있는 걸 발견 — CPU 트리거가 limit이 아니라 request 대비 평균 사용률을 보기 때문(순간 버스트는 5분 평균에 안 잡힘)이라는 구조를 확인. replica 증설이 아니라 개별 파드 limit 추가 상향을 권고(아직 미적용, 사용자 판단 대기).
+
+- [[troubleshooting/keda-scaling-missing-metrics-server]], [[troubleshooting/hikaricp-connection-storm-load-test]], [[troubleshooting/backend-cpu-throttling-and-scaling-load-test]] 신설
+- [[architecture/keda-autoscaling]] 신설 — KEDA 구조를 troubleshooting 문서들과 별개로 참조 가능하게 정리(엔진/규칙 분리 배치, ArgoCD `ignoreDifferences`로 replicas 충돌 방지 등)
+- index.md 갱신 — troubleshooting/architecture 목록 추가, 고아 페이지 섹션에 "CPU limit 2차 상향 미적용", "PR #15 아직 dev로 merge 안 됨" 추가
