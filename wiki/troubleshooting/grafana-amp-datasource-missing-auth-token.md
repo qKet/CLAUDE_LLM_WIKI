@@ -1,12 +1,12 @@
 ---
-title: Grafana의 grafana-amazonprometheus-datasource 플러그인이 쿼리에 인증 헤더를 안 붙임 (미해결)
+title: Grafana의 grafana-amazonprometheus-datasource 플러그인이 쿼리에 인증 헤더를 안 붙임 (해결됨)
 category: troubleshooting
-tags: [monitoring, grafana, amp, prometheus, sigv4, 미해결]
+tags: [monitoring, grafana, amp, prometheus, sigv4, 해결됨]
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-08-18
 ---
 
-# Grafana의 grafana-amazonprometheus-datasource 플러그인이 쿼리에 인증 헤더를 안 붙임 (미해결)
+# Grafana의 grafana-amazonprometheus-datasource 플러그인이 쿼리에 인증 헤더를 안 붙임 (해결됨)
 
 ## 증상
 
@@ -42,22 +42,45 @@ unexpected response with status code 403: {"message":"Missing Authentication Tok
 9. **authType `ec2_iam_role` 옵션도 시도 — 기각**: 플러그인 문서를 보니 인증 방식으로 `default`/`keys`/`credentials`/`ec2_iam_role` 4가지가 있고, 지금까지 `default`(IRSA로 될 줄 알았음)와 `keys`(access key)만 시도했었음. `ec2_iam_role`은 IRSA/EC2 인스턴스 프로파일용으로 별도 존재하길래 Terraform 안 거치고 Grafana API로 임시 데이터소스를 만들어 빠르게 테스트함 — **역시 동일하게 실패**(checkHealth 403, queryData Missing Auth Token). 이걸로 인증 방식 3가지(default/keys/ec2_iam_role) 전부 동일 실패 확인.
 10. **업스트림에 이미 보고된 알려진 버그 발견**: GitHub `grafana/grafana-amazonprometheus-datasource` 저장소의 [Issue #640](https://github.com/grafana/grafana-amazonprometheus-datasource/issues/640) — 제목이 정확히 "Missing Authentication Token until 'Save and Test' is Selected". **Helm으로 프로비저닝한 데이터소스에서 우리와 똑같은 증상**을 겪고 있고(UI에서 수동으로 "Save and Test"를 누르면 그때만 해결되는데, 우리처럼 `additionalDataSources`로 provisioning하면 UI 편집 자체가 막혀있어서 이 workaround를 쓸 수가 없음), 이슈는 **아직 미해결(Waiting) 상태**로 남아있음. 즉 우리 환경 특이 문제가 아니라 플러그인 자체의 알려진 미해결 버그.
 
-## 결론 (갱신)
+## 해결 (2026-08-18)
 
-**`grafana-amazonprometheus-datasource` v3.1.0의 확실한 업스트림 버그.** `queryData` 요청에 SigV4 `Authorization` 헤더가 아예 안 붙는 것으로 보이며(인증 헤더 없이 보낸 요청과 완전히 동일한 에러), 이는 인증 방식(default/keys/ec2_iam_role)이나 URL 형식과 무관하게 항상 발생함. GitHub Issue #640에서 동일 증상이 이미 보고돼 있고, 유일하게 알려진 workaround("Save and Test" 수동 클릭)는 Helm/Terraform으로 provisioning하는 우리 방식(`readOnly: true`)에서는 애초에 적용 불가능. **코드/설정만으로는 해결 불가 — 플러그인 쪽 수정을 기다리거나 다른 접근이 필요.**
+**원인**: SigV4 서명을 실제로 요청에 붙이려면 두 군데를 **같이** 켜야 하는데, 그중 하나(데이터소스 쪽 `jsonData.sigV4Auth`)가 빠져있었음.
 
-## 현재 상태 / 임시 조치
+- 이미 켜뒀던 것: Grafana 서버 레벨 `GF_AUTH_SIGV4_AUTH_ENABLED`(위 3번 시도) — 근데 이것만으로는 부족했음
+- **빠져있던 것**: 데이터소스 `jsonData`에 `sigV4Auth: true`를 명시적으로 켜는 것. `authType: "default"`만 설정했었는데, 이 전용 플러그인은 `authType`과 별개로 `sigV4Auth` 필드가 있어야 실제로 서명 미들웨어를 태우는 것으로 보임(플러그인 자체 문서/코드에 명시적으로 안 나와있어서 우리도 처음엔 놓쳤음).
 
-- **데이터 자체는 안전함** — `remoteWrite`는 정상 작동 중이라 Prometheus가 수집한 지표는 AMP에 계속 쌓이고 있고, EKS를 destroy/재생성해도 안 없어짐.
-- **Grafana에서 AMP를 직접 조회하는 것만 아직 안 됨** — 지금 당장 과거 데이터를 봐야 하면, 콘솔에 직접 조회 화면이 없으므로(2026-08-12 확인 — CloudWatch와 다르게 AMP 콘솔엔 PromQL 브라우저가 없음) boto3 등으로 SigV4 서명한 스크립트를 사용해야 함.
-- 관련 Terraform 코드(`modules/monitoring`의 `additionalDataSources` 설정, `iam.tf`의 `grafana_amp_query` 정책)는 그대로 남겨둠 — 문제가 해결되면 바로 쓸 수 있는 상태. **URL은 끝 슬래시 있는 원래 형태(`aws_prometheus_workspace.prometheus_endpoint` 그대로)로 유지 — 이게 checkHealth가 통과하던 유일한 형태였음.**
+GitHub Issue #640의 코멘트(`erezzarum`, 2026-05)에서 정확히 같은 조합을 워크어라운드로 제시했고, 다른 사용자(`shivam-dubey-1`)도 효과를 확인해줬던 것을 뒤늦게 발견 — 이슈 자체는 여전히 Open이라 공식 수정은 아니지만, 이 설정 조합으로 우회 가능함이 확인됨.
 
-## 다음에 시도해볼 것
+**실제 적용한 값** (`modules/addons/monitoring/main.tf`):
+```hcl
+set {
+  name  = "grafana.grafana\\.ini.auth.sigv4_auth_enabled"
+  value = "true"
+}
 
-- GitHub Issue #640에 우리 사례(readOnly provisioning이라 workaround 자체가 불가능하다는 점)를 코멘트로 남기고 업스트림 수정 기다리기
-- 플러그인 버전 다운그레이드 (`grafana.plugins`에 `grafana-amazonprometheus-datasource 3.0.x` 등 구버전 명시) — 이 버그가 3.1.0에서 새로 생긴 회귀(regression)일 가능성 확인
-- 최후 수단: AMP 앞단에 SigV4 서명을 대신 처리해주는 간단한 프록시(sidecar)를 두고, Grafana는 그 프록시를 일반 `prometheus` 타입으로 바라보게 하는 방법 — 사실상 AWS 플러그인을 우회
+# 기존 authType/defaultRegion에 추가
+set {
+  name  = "grafana.additionalDataSources[0].jsonData.sigV4Auth"
+  value = "true"
+}
+
+set {
+  name  = "grafana.additionalDataSources[0].jsonData.sigV4Region"
+  value = var.aws_region
+}
+```
+
+적용(`terraform apply -target=module.monitoring`) 후 Grafana pod 재시작, `/api/ds/query`로 AMP 데이터소스 직접 쿼리 테스트 → `status: 200`, 5일 전 데이터까지 정상 조회됨. **미해결로 뒀던 6일 만에 해결.**
+
+## 재발 방지
+
+이 AMP 전용 플러그인은 인증 관련 필드가 여러 개(`authType`, `sigV4Auth`, `sigV4Region`) 있고 문서화가 약해서, "이 정도면 됐겠지" 하고 하나만 켜고 넘어가기 쉽다. 비슷한 AWS SigV4 연동 플러그인을 또 붙일 일이 있으면, **서버 레벨 설정과 데이터소스 레벨 설정을 항상 세트로 확인**할 것 — 서버만 켜고 데이터소스 필드를 빠뜨리면 이번처럼 `checkHealth`는 통과하는데 실제 쿼리만 계속 실패하는, 원인 특정이 어려운 상태가 됨.
+
+## 현재 상태
+
+- Grafana에서 AMP 데이터소스로 직접 조회 가능 — 클러스터 재생성 이전의 과거 데이터도 대시보드에서 바로 볼 수 있음
+- `remoteWrite`(저장)와 `queryData`(조회) 둘 다 정상 동작 확인됨
 
 ## 관련
 - [[../decisions/2026-08-11-monitoring-stack-design]]
-- [GitHub Issue #640](https://github.com/grafana/grafana-amazonprometheus-datasource/issues/640) — 동일 증상의 업스트림 미해결 이슈
+- [GitHub Issue #640](https://github.com/grafana/grafana-amazonprometheus-datasource/issues/640) — 동일 증상, 워크어라운드 코멘트 출처(이슈 자체는 아직 Open)

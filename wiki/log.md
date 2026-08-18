@@ -531,3 +531,13 @@ frontend에 KEDA를 적용하는 과정에서 Grafana "CPU 스로틀링" 패널�
 - Redis는 사용자가 명시적으로 보류 결정 — 나중에 대기열 기능 구현 시 세션/대기열 물리 분리(기존 [[decisions/2026-08-10-redis-session-queue-shared-instance-risk]]의 대안 A)로 갈 가능성이 있어 그때 같이 정하는 게 낫다는 판단. 해당 문서에 2026-08-18 노트로 반영
 - [[decisions/2026-08-18-capacity-planning-large-traffic-readiness]] 상태를 "논의중"에서 "부분 구현 완료"로 갱신, "구현 결과" 섹션 추가(권고 1·2 완료, 3 보류, 4 미착수)
 - index.md 갱신 — architecture/decisions 목록, 고아 페이지 섹션 반영
+
+---
+
+## [2026-08-18] Claude Code | troubleshooting | Grafana-AMP 데이터소스 인증 버그 해결
+
+6일간 미해결이던 [[troubleshooting/grafana-amp-datasource-missing-auth-token]] 문제 해결. 그동안 GitHub Issue #640에 다른 사용자가 남긴 코멘트를 놓치고 있었음 — 서버 레벨 `sigv4_auth_enabled`만 켜고 데이터소스 `jsonData.sigV4Auth` 필드를 빠뜨렸던 게 원인. 두 설정을 같이 켜니 즉시 해결(`terraform apply -target=module.monitoring`, Grafana pod 재시작 후 `/api/ds/query`로 200 확인, 5일 전 데이터까지 정상 조회됨).
+
+- 위키 문서 "미해결" → "해결됨"으로 갱신, 원인/재발방지 섹션 추가
+- index.md 두 곳(troubleshooting 목록, monitoring-stack-design 항목) 갱신
+- `Infra` `feature/nyj`에 커밋+push 완료(`modules/addons/monitoring/main.tf`) — apply 전 `dev`가 15개 커밋 앞서있는 걸 발견해서 먼저 merge(클러스터 오토스케일러, KEDA, RDS 인스턴스 변경, `node_instance_types` t3.xlarge 반영 등 포함), merge 중 `admin-ingress.tf`에 콤마 누락 문법 오류 하나 발견해서 같이 수정
