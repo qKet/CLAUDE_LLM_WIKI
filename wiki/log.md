@@ -507,3 +507,15 @@ k6 부하테스트를 실제로 돌리면서 Grafana/Prometheus/CloudWatch/`kube
 - [[troubleshooting/keda-scaling-missing-metrics-server]], [[troubleshooting/hikaricp-connection-storm-load-test]], [[troubleshooting/backend-cpu-throttling-and-scaling-load-test]] 신설
 - [[architecture/keda-autoscaling]] 신설 — KEDA 구조를 troubleshooting 문서들과 별개로 참조 가능하게 정리(엔진/규칙 분리 배치, ArgoCD `ignoreDifferences`로 replicas 충돌 방지 등)
 - index.md 갱신 — troubleshooting/architecture 목록 추가, 고아 페이지 섹션에 "CPU limit 2차 상향 미적용", "PR #15 아직 dev로 merge 안 됨" 추가
+
+---
+
+## [2026-08-18] Claude Code | troubleshooting + decision | frontend CPU 스로틀링 원인 규명(CFS vs JVM) + 대용량 트래픽 용량 분석
+
+frontend에 KEDA를 적용하는 과정에서 Grafana "CPU 스로틀링" 패널에 유휴 부하에서도 지속되는 스로틀링을 발견, Prometheus 직접 질의로 실측 확인 후 원인 규명과 처방을 정리. 이어서 사용자의 "대용량 트래픽 대비 지금 스펙이 안전한가" 질문에 클러스터 실측 기반으로 답변한 내용도 위키에 정리.
+
+- [[troubleshooting/frontend-cpu-throttling-cfs-quota-vs-jvm-tradeoff]] 신설 — CFS 100ms 쿼터 + Node.js 보조 스레드(GC/libuv/JIT) 버스트가 원인. frontend는 CPU limit 완전 제거(request만 유지)로 해결(`CD/helm/values.yaml`, `values-prod.yaml` 반영). backend는 JVM이 cgroup CPU 쿼터를 읽어 `Runtime.availableProcessors()`/스레드풀 크기를 자동 사이징하는 컨테이너 인지형 런타임이라(`UseContainerSupport`, `ActiveProcessorCount` 명시 오버라이드 없음 확인) 같은 처방을 안 씀 — limit 유지가 오히려 안전하다는 근거까지 문서화
+- [[decisions/2026-08-18-capacity-planning-large-traffic-readiness]] 신설 — `kubectl describe node`/`top nodes`로 실측한 결과 노드 CPU가 baseline에서 이미 60%대이고, 결정적으로 **cluster-autoscaler/Karpenter가 리포 어디에도 설치돼 있지 않아 `node_max_size=3`이 무의미**하다는 걸 확인(KEDA가 파드를 늘려도 노드가 안 늘어남 → Pending). RDS 커넥션 여유(85 중 80 예약)와 버스터블 CPU 크레딧 리스크, Redis 단일노드 소용량도 재확인. 상태는 논의중 — 분석/우선순위 권고(오토스케일러 > RDS 상향 > Redis > 장시간 재측정)까지만, 실제 조치는 미착수
+- [[architecture/keda-autoscaling]] 갱신 — 제목/본문을 backend 전용에서 backend+frontend 공통 구조로 확장, ArgoCD `ignoreDifferences`는 서비스별로 각각 등록해야 한다는 점과 두 서비스의 CPU limit 정책이 다르다는 점 추가
+- [[troubleshooting/backend-cpu-throttling-and-scaling-load-test]]에 2026-08-18 실측 결과(유휴~저부하 기준 backend 스로틀링 정확히 0) 교차 반영, 상호 링크 추가
+- index.md 갱신 — decisions/troubleshooting/architecture 항목 추가, 고아 페이지 섹션에 cluster-autoscaler 부재를 신규 미해결 항목으로 추가

@@ -3,10 +3,12 @@ title: 부하테스트 중 backend CPU 스로틀링 — 1차(limit 상향)와 2�
 category: troubleshooting
 tags: [monitoring, cpu-throttling, keda, autoscaling, cpu-limit, grafana, prometheus, load-test]
 created: 2026-08-13
-updated: 2026-08-13
+updated: 2026-08-18
 ---
 
 # 부하테스트 중 backend CPU 스로틀링 — 1차(limit 상향)와 2차(replica vs limit 재판단)
+
+> 2026-08-18: frontend에도 같은 계열의 스로틀링이 발견됐는데, 원인 구조는 같아도(CFS 100ms 쿼터) 처방은 정반대(backend는 limit 유지, frontend는 limit 제거)였음 — Node.js와 JVM의 컨테이너 CPU 인지 방식 차이 때문. [[frontend-cpu-throttling-cfs-quota-vs-jvm-tradeoff]] 참고. 같은 날 실측(유휴~저부하 트래픽 기준)으로는 backend 스로틀링이 정확히 0으로 확인되어, 아래 2차 권고(limit 2→3~4 추가 상향)의 긴급성은 낮아졌으나 실제 부하테스트로 재검증된 건 아님.
 
 ## 1차: CPU limit이 너무 작았던 문제
 
@@ -73,4 +75,6 @@ replica 수(KEDA `minReplicas`/`maxReplicas`)를 손대는 것보다, **개별 �
 ## 관련
 - [[keda-scaling-missing-metrics-server]]
 - [[hikaricp-connection-storm-load-test]]
+- [[frontend-cpu-throttling-cfs-quota-vs-jvm-tradeoff]]
 - [[../architecture/keda-autoscaling]]
+- [[../decisions/2026-08-18-capacity-planning-large-traffic-readiness]]

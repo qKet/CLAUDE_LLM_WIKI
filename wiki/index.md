@@ -28,7 +28,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[terraform-platform-workload-split]] — infrastructure(공유)/data(workspace) 2-root 구조(구 platform/workload), env_config 패턴, nightly-off 상태를 방어하는 `try()` 패턴
 - [[admin-ingress-shared-alb]] — Grafana+ArgoCD IP 허용목록 공유 ALB, IngressGroup이 `inbound-cidrs`/`healthcheck-path`를 적용하는 단위
 - [[messaging-infrastructure]] — 이메일 발송(SQS+Lambda+SES) 구조, root 배치, Lambda 배포 방식
-- [[keda-autoscaling]] — backend KEDA 오토스케일링 구조(엔진은 Infra/Terraform, ScaledObject는 CD/Helm), metrics-server 전제조건, ArgoCD `ignoreDifferences`로 replicas 충돌 방지
+- [[keda-autoscaling]] — backend/frontend KEDA 오토스케일링 구조(엔진은 Infra/Terraform, ScaledObject는 CD/Helm), metrics-server 전제조건, ArgoCD `ignoreDifferences`로 replicas 충돌 방지, 파드 오토스케일링과 노드 오토스케일링은 별개라는 점
 
 ## decisions/ — "왜 이렇게 하기로 했나" (ADR)
 - [[README]] — 사용법/템플릿
@@ -44,6 +44,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[2026-08-11-vpn-access-control-paused]] — dev/Grafana/CD VPN 접근제어 논의(WireGuard+internal ALB 방향으로 기울었으나 팀 상의 필요해 보류, 결정 아님)
 - [[2026-08-12-messaging-infra-placement]] — 이메일 발송 인프라를 새 root 대신 `04_data`+`03_registry`에 배치, Lambda를 CI 없이 로컬 zip으로 배포
 - [[2026-08-12-sqs-lambda-ses-notification-pipeline]] — 예매확정/취소 알림 파이프라인으로 SQS→Lambda→SES 채택(SNS/EventBridge Scheduler 대신) 근거 — 팀원 공유 아키텍처 노트 기반, 레포 분리/`05_messaging` root 제안은 참고만 하고 안 따름
+- [[2026-08-18-capacity-planning-large-traffic-readiness]] — 대용량 트래픽 대비 용량 분석(실측 기반): cluster-autoscaler/Karpenter 부재가 가장 큰 병목(KEDA가 파드를 늘려도 노드가 안 늘어남), RDS 커넥션 여유·버스터블 크레딧 리스크, Redis 단일노드 재확인 — **논의중, 분석/권고만 완료**
 
 ## troubleshooting/ — 실제 겪은 버그
 - [[null-field-partial-update-bug]] — nullable FK 부분 업데이트 버그 (백/프론트 양쪽)
@@ -64,6 +65,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[keda-scaling-missing-metrics-server]] — 부하테스트에서 KEDA(CPU 트리거)가 전혀 스케일 안 함, 원인은 클러스터에 `metrics-server` 자체가 없었던 것(HPA Condition까지 봐야 드러남) — 설치로 해결, replica 4→8 실제 증가 검증
 - [[hikaricp-connection-storm-load-test]] — 부하테스트만 돌리면 ArgoCD/Grafana까지 같이 멈춤, 원인은 RDS가 아니라 HikariCP 풀 과다(40×8replica=320)로 인한 커넥션 생성 시 CPU 폭증이 버스터블(t3.medium) 노드의 CPU 크레딧을 고갈시켜 같은 노드의 다른 파드까지 굶긴 것 — 풀 사이즈 축소로 해결
 - [[backend-cpu-throttling-and-scaling-load-test]] — backend CPU 스로틀링 2단계: 1차는 CPU limit 자체가 작아서(250m/1) 상향으로 해결(500m/2), 2차는 limit 상향 후에도 순간 스로틀링이 남아있는데 KEDA는 정상적으로 안 늘리는 상황을 관찰 — "스로틀링≠평균 사용률" 구조를 확인하고 replica 증설 대신 limit 추가 상향을 권고(**미적용**, 사용자 판단 대기)
+- [[frontend-cpu-throttling-cfs-quota-vs-jvm-tradeoff]] — frontend KEDA 적용 후 유휴 부하에서도 스로틀링 지속 발견, CFS 100ms 쿼터 + Node.js 보조 스레드(GC/libuv/JIT) 버스트가 원인임을 실측(Prometheus 직접 질의)으로 확인 — frontend는 CPU limit을 아예 제거(request만 유지)해서 해결, backend는 JVM 컨테이너 인지 방식(`ActiveProcessorCount` 자동 사이징) 때문에 같은 처방을 안 씀
 
 ## runbook/ — 반복 운영 절차
 - [[db-schema-change]] — 로컬 DB 스키마 변경 절차 2가지
@@ -96,4 +98,5 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - 프론트 CI의 Toss 키 fetch가 `team5-qket-external-api-release` 이름으로 하드코딩됨 — prod CI 파이프라인을 만들 때 반드시 갱신 필요 ([[decisions/2026-08-11-frontend-ci-toss-key-secrets-manager]] 참고)
 - [[decisions/2026-08-11-frontend-api-routing-alb-not-rewrites]]로 배포 환경 라우팅은 바뀌었지만, 로컬 개발(`npm run dev`) 환경에서 `/api` 프록시를 어떻게 처리할지는 아직 정리 안 됨(온보딩 문서에도 미반영)
 - [[troubleshooting/backend-cpu-throttling-and-scaling-load-test]]의 2차 권고(backend CPU limit을 2→3~4로 추가 상향) — 아직 `CD/helm/values.yaml`에 미반영, 사용자 판단 대기 중
+- [[decisions/2026-08-18-capacity-planning-large-traffic-readiness]] — cluster-autoscaler/Karpenter 미설치가 대용량 트래픽 대비 최우선 과제로 식별됐으나 아직 아무 조치도 안 함. RDS 인스턴스 상향, Redis HA, 장시간 부하테스트 재측정도 전부 미착수
 - `Infra` PR #15(`feature/nyj`, 모니터링/AMP 작업)가 merge conflict 해결 완료로 `MERGEABLE` 상태까지 갔지만 아직 `dev`로 실제 merge는 안 됨 — 나윤준님 직접 확인 후 merge할지, 바로 merge할지 미결정
