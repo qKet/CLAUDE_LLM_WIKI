@@ -29,13 +29,14 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[admin-ingress-shared-alb]] — Grafana+ArgoCD IP 허용목록 공유 ALB, IngressGroup이 `inbound-cidrs`/`healthcheck-path`를 적용하는 단위
 - [[messaging-infrastructure]] — 이메일 발송(SQS+Lambda+SES) 구조, root 배치, Lambda 배포 방식
 - [[keda-autoscaling]] — backend/frontend KEDA 오토스케일링 구조(엔진은 Infra/Terraform, ScaledObject는 CD/Helm), metrics-server 전제조건, ArgoCD `ignoreDifferences`로 replicas 충돌 방지, 파드 오토스케일링과 노드 오토스케일링은 별개라는 점
+- [[cluster-autoscaler]] — 노드 레벨 오토스케일링(EKS 관리형 노드그룹 desired_size 자동 조절), Karpenter 대신 선택한 이유, ASG autodiscovery 태그가 이미 자동으로 붙어있다는 점, IRSA 전파 지연으로 최초 1회 크래시하는 게 정상이라는 점
 
 ## decisions/ — "왜 이렇게 하기로 했나" (ADR)
 - [[README]] — 사용법/템플릿
 - [[2026-08-06-ci-tool-github-actions]] — CI 도구로 GitHub Actions 선택 (Jenkins 대신)
 - [[2026-08-06-terraform-module-restructure]] — Terraform 모듈 리소스타입별 재편 + platform/workload 2-root화
 - [[2026-08-06-ecr-recreate-vs-import]] — 기존 ECR 저장소 import 대신 삭제 후 재생성
-- [[2026-08-10-redis-session-queue-shared-instance-risk]] — 세션/대기열이 같은 Redis 인스턴스 공유 시 리스크(noisy neighbor, 메모리 압박), 페일오버로도 안 풀리는 부분, 물리 분리 vs 논리 DB 분리 비용 비교 (논의중 — 부하테스트 후 재검토)
+- [[2026-08-10-redis-session-queue-shared-instance-risk]] — 세션/대기열이 같은 Redis 인스턴스 공유 시 리스크(noisy neighbor, 메모리 압박), 페일오버로도 안 풀리는 부분, 물리 분리 vs 논리 DB 분리 비용 비교 (논의중 — 부하테스트 후 재검토, 2026-08-18 대용량 트래픽 분석에서도 다시 보류 확정)
 - [[2026-08-10-cd-writeback-github-app]] — CD 레포 write-back 인증으로 GitHub App 선택(PAT 대신) — 장기 자격증명을 시크릿에 안 두려는 원칙, 개인 계정으로 잘못 생성됐던 시행착오 포함
 - [[2026-08-11-monitoring-stack-design]] — 모니터링 스택 설계(kube-prometheus-stack + Loki + CloudWatch 연동), 로그/지표 영구 저장소를 `03_registry`에 두기로 한 이유, 1차/2차 범위 구분 (범위 축소해서 구현 완료 — Loki는 빠짐, 실제 구현 결과는 문서 하단 참고)
 - [[2026-08-11-external-api-secrets-manager]] — OAuth 3사/Toss 키를 Secrets Manager 새 시크릿(`external_api`)+ESO로 관리, `ignore_changes`로 사람이 채운 값 보호
@@ -44,7 +45,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[2026-08-11-vpn-access-control-paused]] — dev/Grafana/CD VPN 접근제어 논의(WireGuard+internal ALB 방향으로 기울었으나 팀 상의 필요해 보류, 결정 아님)
 - [[2026-08-12-messaging-infra-placement]] — 이메일 발송 인프라를 새 root 대신 `04_data`+`03_registry`에 배치, Lambda를 CI 없이 로컬 zip으로 배포
 - [[2026-08-12-sqs-lambda-ses-notification-pipeline]] — 예매확정/취소 알림 파이프라인으로 SQS→Lambda→SES 채택(SNS/EventBridge Scheduler 대신) 근거 — 팀원 공유 아키텍처 노트 기반, 레포 분리/`05_messaging` root 제안은 참고만 하고 안 따름
-- [[2026-08-18-capacity-planning-large-traffic-readiness]] — 대용량 트래픽 대비 용량 분석(실측 기반): cluster-autoscaler/Karpenter 부재가 가장 큰 병목(KEDA가 파드를 늘려도 노드가 안 늘어남), RDS 커넥션 여유·버스터블 크레딧 리스크, Redis 단일노드 재확인 — **논의중, 분석/권고만 완료**
+- [[2026-08-18-capacity-planning-large-traffic-readiness]] — 대용량 트래픽 대비 용량 분석(실측 기반): cluster-autoscaler/Karpenter 부재가 가장 큰 병목(KEDA가 파드를 늘려도 노드가 안 늘어남), RDS 커넥션 여유·버스터블 크레딧 리스크, Redis 단일노드 재확인 — **같은 날 cluster-autoscaler 설치 + RDS release 상향(db.t3.medium)까지 완료, Redis는 사용자가 보류 결정, 장시간 재측정은 미착수**
 
 ## troubleshooting/ — 실제 겪은 버그
 - [[null-field-partial-update-bug]] — nullable FK 부분 업데이트 버그 (백/프론트 양쪽)
@@ -98,5 +99,5 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - 프론트 CI의 Toss 키 fetch가 `team5-qket-external-api-release` 이름으로 하드코딩됨 — prod CI 파이프라인을 만들 때 반드시 갱신 필요 ([[decisions/2026-08-11-frontend-ci-toss-key-secrets-manager]] 참고)
 - [[decisions/2026-08-11-frontend-api-routing-alb-not-rewrites]]로 배포 환경 라우팅은 바뀌었지만, 로컬 개발(`npm run dev`) 환경에서 `/api` 프록시를 어떻게 처리할지는 아직 정리 안 됨(온보딩 문서에도 미반영)
 - [[troubleshooting/backend-cpu-throttling-and-scaling-load-test]]의 2차 권고(backend CPU limit을 2→3~4로 추가 상향) — 아직 `CD/helm/values.yaml`에 미반영, 사용자 판단 대기 중
-- [[decisions/2026-08-18-capacity-planning-large-traffic-readiness]] — cluster-autoscaler/Karpenter 미설치가 대용량 트래픽 대비 최우선 과제로 식별됐으나 아직 아무 조치도 안 함. RDS 인스턴스 상향, Redis HA, 장시간 부하테스트 재측정도 전부 미착수
+- ✅ (대부분 해결, 2026-08-18) [[decisions/2026-08-18-capacity-planning-large-traffic-readiness]] — cluster-autoscaler 설치, RDS release를 `db.t3.medium`으로 상향까지 완료. 여전히 미착수: prod RDS 상향(재측정 후 결정 예정), Redis 용량/HA(사용자가 명시적으로 보류), 목표 동접자 수 기준 장시간 부하테스트 재측정
 - `Infra` PR #15(`feature/nyj`, 모니터링/AMP 작업)가 merge conflict 해결 완료로 `MERGEABLE` 상태까지 갔지만 아직 `dev`로 실제 merge는 안 됨 — 나윤준님 직접 확인 후 merge할지, 바로 merge할지 미결정

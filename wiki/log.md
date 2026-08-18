@@ -519,3 +519,15 @@ frontend에 KEDA를 적용하는 과정에서 Grafana "CPU 스로틀링" 패널�
 - [[architecture/keda-autoscaling]] 갱신 — 제목/본문을 backend 전용에서 backend+frontend 공통 구조로 확장, ArgoCD `ignoreDifferences`는 서비스별로 각각 등록해야 한다는 점과 두 서비스의 CPU limit 정책이 다르다는 점 추가
 - [[troubleshooting/backend-cpu-throttling-and-scaling-load-test]]에 2026-08-18 실측 결과(유휴~저부하 기준 backend 스로틀링 정확히 0) 교차 반영, 상호 링크 추가
 - index.md 갱신 — decisions/troubleshooting/architecture 항목 추가, 고아 페이지 섹션에 cluster-autoscaler 부재를 신규 미해결 항목으로 추가
+
+---
+
+## [2026-08-18] Claude Code | decision + architecture | cluster-autoscaler 설치, RDS release 상향 — 대용량 트래픽 용량 분석 후속 조치
+
+같은 날 앞서 작성한 [[decisions/2026-08-18-capacity-planning-large-traffic-readiness]]의 권고를 사용자와 함께 실제로 실행. Cluster Autoscaler vs Karpenter 중 프로젝트 규모(인스턴스 타입 1종, 노드 최대 3대)에 맞춰 Cluster Autoscaler로 결정하고 바로 구현·검증까지 완료.
+
+- [[architecture/cluster-autoscaler]] 신설 — `Infra/modules/addons/cluster-autoscaler`(IRSA+helm, 다른 addon과 동일 패턴) 구조 문서화. EKS 관리형 노드그룹의 ASG에 autodiscovery 태그가 AWS에 의해 이미 자동으로 붙어있음을 실측 확인(노드그룹 Terraform 코드는 전혀 안 건드림), IAM 쓰기 권한은 `k8s.io/cluster-autoscaler/<클러스터명>=owned` 태그 조건으로 스코프(같은 계정에 team1-eks/doro-erp-dev 등 다른 팀 클러스터도 있어서). 설치 직후 IRSA trust policy 전파 지연으로 파드가 1회 크래시 후 자동 재시작되는 것도 정상 동작으로 확인·문서화(daily-infrastructure-toggle 루틴에서 매번 재현 예상)
+- RDS release 인스턴스를 `db.t3.micro` → `db.t3.medium`으로 상향(`04_data/main.tf` 수정 → `terraform apply`). `aws_db_instance`에 `apply_immediately`가 없어서 기본적으로 다음 유지보수 기간까지 미뤄지는 것을 확인, 사용자 확인 후 `aws rds modify-db-instance --apply-immediately`로 즉시 적용까지 완료(실제 전환 검증함). prod(`db.t3.small`)는 보류
+- Redis는 사용자가 명시적으로 보류 결정 — 나중에 대기열 기능 구현 시 세션/대기열 물리 분리(기존 [[decisions/2026-08-10-redis-session-queue-shared-instance-risk]]의 대안 A)로 갈 가능성이 있어 그때 같이 정하는 게 낫다는 판단. 해당 문서에 2026-08-18 노트로 반영
+- [[decisions/2026-08-18-capacity-planning-large-traffic-readiness]] 상태를 "논의중"에서 "부분 구현 완료"로 갱신, "구현 결과" 섹션 추가(권고 1·2 완료, 3 보류, 4 미착수)
+- index.md 갱신 — architecture/decisions 목록, 고아 페이지 섹션 반영

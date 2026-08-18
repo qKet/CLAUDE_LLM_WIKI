@@ -5,9 +5,12 @@ status: 논의중
 date: 2026-08-10
 author: MoonJunH
 tags: [redis, elasticache, session, queue, capacity-planning]
+updated: 2026-08-18
 ---
 
 # 세션-대기열 Redis 인스턴스 공유 리스크 및 대응 방향
+
+> 2026-08-18: [[2026-08-18-capacity-planning-large-traffic-readiness]](대용량 트래픽 용량 분석)에서 Redis 스펙 상향도 후보로 나왔으나, 그 결정을 이 문서로 다시 미룸 — 지금 스펙만 올려봐야 "재검토 트리거"(부하테스트 실측)가 아직 없어서 근거 없이 비용만 느는 것이고, 대기열 기능을 실제로 구현하는 시점에 대안 A(물리 분리)로 갈 가능성이 있어 그때 같이 정하는 게 낫다는 판단(사용자 확인). RDS는 같은 분석에서 release만 `db.t3.medium`으로 먼저 올림 — Redis만 별도로 보류.
 
 ## 배경
 

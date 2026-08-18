@@ -1,12 +1,14 @@
 ---
 title: 대용량 트래픽 대비 현재 인프라 용량 분석 — 노드 오토스케일러 부재가 가장 큰 병목
 category: decisions
-status: 논의중 (분석/권고만 완료, 실제 조치는 아직 안 함)
+status: 부분 구현 완료 (권고 1·2 반영, 3은 사용자 판단으로 보류, 4는 미착수)
 date: 2026-08-18
 author: Claude Code
 tags: [capacity-planning, autoscaling, cluster-autoscaler, karpenter, rds, redis, keda]
 updated: 2026-08-18
 ---
+
+> ✅ 2026-08-18 같은 날 바로 후속 조치까지 진행: 권고 1(cluster-autoscaler)과 2(RDS 상향, release만)를 실제로 적용함. 권고 3(Redis)은 "대기열 기능 구현 시 물리 분리가 필요할 수 있다"는 이유로 사용자가 명시적으로 보류 결정([[2026-08-10-redis-session-queue-shared-instance-risk]] 참고). 권고 4(장시간 재측정)는 아직 미착수. 아래 원본 분석/권고는 그대로 두고, 실제로 뭘 했는지는 맨 아래 "구현 결과" 섹션에 정리.
 
 # 대용량 트래픽 대비 현재 인프라 용량 분석
 
@@ -72,8 +74,29 @@ node2: cpu 2350m / 3920m allocatable (60%)
 - cluster-autoscaler/Karpenter 도입은 그 자체로 새로운 운영 부담(스케일 다운 타이밍, 파드 disruption budget 등)이 생김 — 도입 시 별도 architecture 문서 필요
 - RDS 버스터블 CPU 크레딧 소진 시나리오는 아직 실측 없이 이론적 위험으로만 기록함 — 실제 장시간 부하테스트로 검증 필요
 
+## 구현 결과 (실제로 한 것, 2026-08-18)
+
+### 1. cluster-autoscaler 설치 완료
+
+`Infra/modules/addons/cluster-autoscaler` 신설(IRSA + `helm_release`, `02_k8s-addon`에서 호출) — 상세 구조는 [[../architecture/cluster-autoscaler]] 참고. 설치 직후 파드가 IRSA trust policy 전파 지연으로 1번 크래시했다가 자동 재시작 후 정상화되는 걸 실측함(재발 예상, 조치 불필요 — 위 문서 참고).
+
+### 2. RDS 인스턴스 클래스 상향 완료 (release만)
+
+`04_data/main.tf`의 `env_config_map.release.db_instance_class`를 `db.t3.micro` → `db.t3.medium`으로 변경, `terraform apply` 완료. **주의**: `aws_db_instance`는 `apply_immediately`를 명시적으로 켜두지 않아서(모듈에 없음), `terraform apply`가 성공해도 실제 변경은 기본적으로 **다음 유지보수 기간까지 미뤄짐**(`PendingModifiedValues`로만 반영됨, 실제 클래스는 그대로) — 즉시 반영하려면 `aws rds modify-db-instance --apply-immediately`를 따로 호출해야 함(짧은 재부팅 발생, 1~2분). 이번엔 사용자 확인 후 즉시 적용까지 완료해서 실제로 `db.t3.medium`으로 전환됨.
+
+prod는 아직 `db.t3.small` 그대로 — release에서 재측정 후 결정하기로 함(사용자 판단).
+
+### 3. Redis — 보류 (사용자 결정)
+
+용량/HA 상향 안 함. 이유는 [[2026-08-10-redis-session-queue-shared-instance-risk]]에 추가된 2026-08-18 노트 참고 — 지금 스펙만 올려봐야 재검토 트리거(부하테스트 실측)가 없어서 근거 없는 비용 증가이고, 나중에 대기열 기능을 실제로 만들 때 세션/대기열 물리 분리(그 문서의 대안 A)로 갈 가능성이 있어 그때 한 번에 정하는 게 낫다고 판단.
+
+### 4. 장시간/대규모 재측정 — 미착수
+
+아직 안 함. cluster-autoscaler와 RDS가 바뀐 뒤 실제로 8/8 스케일아웃 + 노드 3대 증설이 기대대로 동작하는지, RDS 버스터블 크레딧이 몇 분 지속 부하에서 어떻게 버티는지 재검증 필요.
+
 ## 관련
 - [[../architecture/keda-autoscaling]]
+- [[../architecture/cluster-autoscaler]]
 - [[../troubleshooting/frontend-cpu-throttling-cfs-quota-vs-jvm-tradeoff]]
 - [[../troubleshooting/hikaricp-connection-storm-load-test]]
 - [[../troubleshooting/backend-cpu-throttling-and-scaling-load-test]]
