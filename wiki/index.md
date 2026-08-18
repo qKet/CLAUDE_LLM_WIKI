@@ -63,6 +63,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[ses-dkim-preexisting-records-import]] — `03_registry` 첫 apply에서 SES DKIM CNAME이 이미 존재해 실패, `terraform import`로 기존 레코드를 state에 편입
 - [[lambda-env-var-and-runtime-version-gotchas]] — Lambda 예약 환경변수(`AWS_REGION`) 직접 설정 불가, `nodejs24.x`는 AWS provider v6.21.0+ 필요(현재 `~> 5.0` 고정이라 업그레이드 전까지 `nodejs22.x` 사용)
 - [[grafana-amp-datasource-missing-auth-token]] — Grafana의 `grafana-amazonprometheus-datasource` 플러그인이 쿼리 요청에 인증 헤더를 안 붙이는 문제 — **해결됨(2026-08-18)**, `jsonData.sigV4Auth` 필드 누락이 원인이었음
+- [[grafana-amp-rate-interval-sparse-historical-data]] — AMP 전환 후 넓은 시간 범위로 보면 예전 데이터가 빈 값으로 보이는 문제 — **해결됨(2026-08-18)**, `rate()`/`increase()`의 고정 `[5m]` 윈도우를 `$__rate_interval`로 교체
 - [[keda-scaling-missing-metrics-server]] — 부하테스트에서 KEDA(CPU 트리거)가 전혀 스케일 안 함, 원인은 클러스터에 `metrics-server` 자체가 없었던 것(HPA Condition까지 봐야 드러남) — 설치로 해결, replica 4→8 실제 증가 검증
 - [[hikaricp-connection-storm-load-test]] — 부하테스트만 돌리면 ArgoCD/Grafana까지 같이 멈춤, 원인은 RDS가 아니라 HikariCP 풀 과다(40×8replica=320)로 인한 커넥션 생성 시 CPU 폭증이 버스터블(t3.medium) 노드의 CPU 크레딧을 고갈시켜 같은 노드의 다른 파드까지 굶긴 것 — 풀 사이즈 축소로 해결
 - [[backend-cpu-throttling-and-scaling-load-test]] — backend CPU 스로틀링 2단계: 1차는 CPU limit 자체가 작아서(250m/1) 상향으로 해결(500m/2), 2차는 limit 상향 후에도 순간 스로틀링이 남아있는데 KEDA는 정상적으로 안 늘리는 상황을 관찰 — "스로틀링≠평균 사용률" 구조를 확인하고 replica 증설 대신 limit 추가 상향을 권고(**미적용**, 사용자 판단 대기)

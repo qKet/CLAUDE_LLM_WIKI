@@ -541,3 +541,13 @@ frontend에 KEDA를 적용하는 과정에서 Grafana "CPU 스로틀링" 패널�
 - 위키 문서 "미해결" → "해결됨"으로 갱신, 원인/재발방지 섹션 추가
 - index.md 두 곳(troubleshooting 목록, monitoring-stack-design 항목) 갱신
 - `Infra` `feature/nyj`에 커밋+push 완료(`modules/addons/monitoring/main.tf`) — apply 전 `dev`가 15개 커밋 앞서있는 걸 발견해서 먼저 merge(클러스터 오토스케일러, KEDA, RDS 인스턴스 변경, `node_instance_types` t3.xlarge 반영 등 포함), merge 중 `admin-ingress.tf`에 콤마 누락 문법 오류 하나 발견해서 같이 수정
+
+---
+
+## [2026-08-18] Claude Code | troubleshooting | AMP 전환 후 넓은 시간 범위 조회 시 예전 데이터 빈 값 문제 해결
+
+[[troubleshooting/grafana-amp-datasource-missing-auth-token]] 해결 직후 대시보드 패널 14개를 전부 AMP 데이터소스로 전환했는데, 넓은 시간 범위(Last 7 days)로 보면 최근 몇 시간만 나오고 예전 데이터(8/13)는 빈 값으로 보이는 새 문제를 발견. `rate(...[5m])`처럼 고정된 짧은 lookback 윈도우가 원인 — 클러스터가 간헐적으로만 켜져있어 예전 샘플이 듬성듬성한데, 넓게 볼 때 쿼리 시점 간격이 `[5m]`보다 커서 대부분 샘플을 놓침. `$__rate_interval`(Grafana 내장 변수, 현재 시간 범위에 맞춰 윈도우 자동 조절)로 교체해서 해결 — 7일 범위 조회 시 데이터 포인트 전부 채워지는 것 확인.
+
+- [[troubleshooting/grafana-amp-rate-interval-sparse-historical-data]] 신설
+- index.md 갱신 (troubleshooting 목록에 신규 문서 추가)
+- `Infra` `feature/nyj`에 커밋+push, PR #22(`feature/nyj → dev`)에 자동 반영됨(대시보드 AMP 전환 PR과 같은 브랜치라 별도 PR 안 만들고 기존 PR에 커밋 추가)
