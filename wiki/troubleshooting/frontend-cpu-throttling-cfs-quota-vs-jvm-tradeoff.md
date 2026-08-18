@@ -8,6 +8,8 @@ updated: 2026-08-18
 
 # frontend CPU 스로틀링 — CFS 쿼터 구조 원인 규명, backend와 다르게 limit을 아예 없앤 이유
 
+> ✅ 2026-08-18(같은 날 저녁): 아래 CPU limit 제거 수정이 한동안 로컬(`CD` 레포)에만 커밋 안 된 채 남아있어서, 실제 배포된 Deployment는 계속 `limits.cpu: "1"`이 붙은 옛 상태였음 — 부하테스트로 실측했을 때도 그래서 여전히 스로틀링이 관찰됨(이 문서의 처방이 "안 먹힌" 게 아니라 "안 나간" 것). 이후 커밋(`1c03fad fix: frontend cpu limit 제거`)으로 실제 배포 완료함. **교훈**: 코드를 고쳤다고 끝난 게 아니라, ArgoCD가 그 커밋을 실제로 sync했는지까지 확인해야 함 — CD 레포는 자동 sync가 아니라 수동 Sync 트리거 방식이라 더더욱.
+
 ## 증상
 
 `frontend`에도 KEDA를 붙이면서(아래 관련 커밋: `c0da8a1 Feature: frontend keda 세팅`) Grafana "CPU 스로틀링(5분간, pod별)" 패널을 보니:

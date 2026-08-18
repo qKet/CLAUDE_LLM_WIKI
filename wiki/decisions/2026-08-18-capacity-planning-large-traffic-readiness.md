@@ -1,14 +1,14 @@
 ---
 title: 대용량 트래픽 대비 현재 인프라 용량 분석 — 노드 오토스케일러 부재가 가장 큰 병목
 category: decisions
-status: 부분 구현 완료 (권고 1·2 반영, 3은 사용자 판단으로 보류, 4는 미착수)
+status: 부분 구현 완료 (권고 1·2 반영, 3은 사용자 판단으로 보류, 4는 실행 중 — 새 심각 리스크 발견)
 date: 2026-08-18
 author: Claude Code
-tags: [capacity-planning, autoscaling, cluster-autoscaler, karpenter, rds, redis, keda]
+tags: [capacity-planning, autoscaling, cluster-autoscaler, karpenter, rds, redis, keda, alb, health-check]
 updated: 2026-08-18
 ---
 
-> ✅ 2026-08-18 같은 날 바로 후속 조치까지 진행: 권고 1(cluster-autoscaler)과 2(RDS 상향, release만)를 실제로 적용함. 권고 3(Redis)은 "대기열 기능 구현 시 물리 분리가 필요할 수 있다"는 이유로 사용자가 명시적으로 보류 결정([[2026-08-10-redis-session-queue-shared-instance-risk]] 참고). 권고 4(장시간 재측정)는 아직 미착수. 아래 원본 분석/권고는 그대로 두고, 실제로 뭘 했는지는 맨 아래 "구현 결과" 섹션에 정리.
+> ✅ 2026-08-18 같은 날 바로 후속 조치까지 진행: 권고 1(cluster-autoscaler)과 2(RDS 상향, release만)를 실제로 적용함. 권고 3(Redis)은 "대기열 기능 구현 시 물리 분리가 필요할 수 있다"는 이유로 사용자가 명시적으로 보류 결정([[2026-08-10-redis-session-queue-shared-instance-risk]] 참고). 권고 4(장시간 재측정)는 500명→만 명까지 실제로 진행했고, 그 과정에서 이 문서가 예측 못 했던 **새로운 심각한 리스크(ALB 헬스체크 연쇄 장애로 전체 다운)** 를 발견함 — [[../troubleshooting/loadtest-10000-open-run-cascading-failures]] 참고, 아직 미해결. 아래 원본 분석/권고는 그대로 두고, 실제로 뭘 했는지는 맨 아래 "구현 결과" 섹션에 정리.
 
 # 대용량 트래픽 대비 현재 인프라 용량 분석
 
@@ -90,9 +90,22 @@ prod는 아직 `db.t3.small` 그대로 — release에서 재측정 후 결정하
 
 용량/HA 상향 안 함. 이유는 [[2026-08-10-redis-session-queue-shared-instance-risk]]에 추가된 2026-08-18 노트 참고 — 지금 스펙만 올려봐야 재검토 트리거(부하테스트 실측)가 없어서 근거 없는 비용 증가이고, 나중에 대기열 기능을 실제로 만들 때 세션/대기열 물리 분리(그 문서의 대안 A)로 갈 가능성이 있어 그때 한 번에 정하는 게 낫다고 판단.
 
-### 4. 장시간/대규모 재측정 — 미착수
+### 4. 목표 규모 재측정 — 500명 → 만 명까지 진행, 새로운 리스크 발견
 
-아직 안 함. cluster-autoscaler와 RDS가 바뀐 뒤 실제로 8/8 스케일아웃 + 노드 3대 증설이 기대대로 동작하는지, RDS 버스터블 크레딧이 몇 분 지속 부하에서 어떻게 버티는지 재검증 필요.
+`Infra/loadtest/open_run_10000_no_queue.js`/`open_run_10000_with_queue.js`(신설)로 500 → 10000명까지 단계적으로 올려서 재측정함. 자세한 진단 과정과 발견 전부는 [[../troubleshooting/loadtest-10000-open-run-cascading-failures]] 참고, 여기는 이 문서(용량 분석)와 직결되는 결론만 요약:
+
+- **cluster-autoscaler/KEDA 실전 검증 완료** — 500명 테스트 중 실제로 3번째 노드가 자동으로 붙는 것, KEDA가 backend/frontend를 4→8로 스케일아웃하는 것 전부 실측으로 확인됨(이 문서 1번 발견이 실제로 해결됐음이 증명됨)
+- **KEDA는 반응형이라 순간 폭증엔 근본적 한계가 있음(신규 발견)** — 트래픽이 "그 순간 다 몰리면" 판단→새 파드 스케줄링→JVM 부팅까지의 지연(수십 초~1분)을 오토스케일러가 못 없애줌. 그 사이엔 기존 최소 replica(4개)가 부하를 몰빵으로 받음("thundering herd") — 대기열이나 사전 스케일업 같은 별도 장치가 필요, 오토스케일러 하나로는 못 풂
+- **backend KEDA `maxReplicas`를 8→12로 상향함** — 실측 중 CPU가 목표(70%)를 넘어 102%까지 갔는데도 8개가 상한이라 더 못 늘어나는 걸 확인. RDS가 `db.t3.medium`(~340 커넥션)으로 이미 올라가 있어서 `12 × dbPoolSize(10) = 120`도 안전한 여유 범위. `backend.resources.limits.cpu`도 이 과정에서 `2` → `3`으로 같이 상향됨
+- **🔴 새로 발견된 심각한 리스크: ALB 헬스체크 연쇄 장애로 완전 다운** — 이 문서가 예상 못 했던 층위의 문제. 부하가 심해지면 파드가 헬스체크에도 제때 응답 못 해서 ALB가 로테이션에서 제외하고, 남은 파드가 더 몰려서 도미노로 전부 제외되며 `HealthyHostCount=0`(완전 다운)까지 실제로 재현됨. **이 문서의 "노드/DB/Redis 스펙" 관점 분석만으로는 못 잡아내는 종류의 리스크였음** — 자세한 내용/미해결 대응 방안은 [[../troubleshooting/loadtest-10000-open-run-cascading-failures]]의 "문제 4" 참고
+- RDS 버스터블 CPU 크레딧 소진 시나리오는 여전히 미검증(이번 테스트도 순간 폭증형이라 "몇 분 지속" 시나리오는 아직 없음)
+
+## 다음 세션에서 이어갈 것 (2026-08-18 종료 시점 기준)
+
+1. **최우선**: frontend 헬스체크 경로를 무거운 `/`에서 전용 엔드포인트로 분리 — ALB 연쇄 장애의 직접 원인
+2. ArgoCD `repo-server`에 최소 리소스 request 부여(BestEffort라 부하테스트 중 자기가 먼저 굶어 죽는 걸 확인함)
+3. 위 조치 후 `open_run_10000_with_queue.js`(대기열 포함판)로도 같은 규모 재측정 — 대기열이 이 연쇄 장애를 실제로 막아주는지 검증
+4. RDS 버스터블 크레딧 소진 여부는 여전히 미검증 — 짧은 스파이크가 아니라 몇 분 이상 지속되는 시나리오 필요
 
 ## 관련
 - [[../architecture/keda-autoscaling]]
@@ -100,4 +113,5 @@ prod는 아직 `db.t3.small` 그대로 — release에서 재측정 후 결정하
 - [[../troubleshooting/frontend-cpu-throttling-cfs-quota-vs-jvm-tradeoff]]
 - [[../troubleshooting/hikaricp-connection-storm-load-test]]
 - [[../troubleshooting/backend-cpu-throttling-and-scaling-load-test]]
+- [[../troubleshooting/loadtest-10000-open-run-cascading-failures]]
 - [[2026-08-10-redis-session-queue-shared-instance-risk]]

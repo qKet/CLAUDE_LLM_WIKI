@@ -551,3 +551,23 @@ frontend에 KEDA를 적용하는 과정에서 Grafana "CPU 스로틀링" 패널�
 - [[troubleshooting/grafana-amp-rate-interval-sparse-historical-data]] 신설
 - index.md 갱신 (troubleshooting 목록에 신규 문서 추가)
 - `Infra` `feature/nyj`에 커밋+push, PR #22(`feature/nyj → dev`)에 자동 반영됨(대시보드 AMP 전환 PR과 같은 브랜치라 별도 PR 안 만들고 기존 PR에 커밋 추가)
+
+---
+
+## [2026-08-18] Claude Code | troubleshooting | 만 명 오픈런 부하테스트 — k6 클라이언트 함정 3개 + ALB 헬스체크 연쇄 장애 발견 (하루 마무리 정리)
+
+`decisions/2026-08-18-capacity-planning-large-traffic-readiness`의 4번 권고(목표 규모 재측정)를 실제로 실행. `Infra/loadtest/`에 `open_run_10000_no_queue.js`/`open_run_10000_with_queue.js` 신설(대기열 포함/미포함 2버전, 실제 백엔드 컨트롤러 코드를 읽어서 홈→로그인→상세→(대기열)→좌석조회→예매 풀 여정 재현). 500명 → 만 명까지 단계적으로 올리면서 문제 4개를 순서대로 발견·해결(3개)/발견만(1개, 최심각).
+
+- [[troubleshooting/loadtest-10000-open-run-cascading-failures]] 신설 — 이번 회차의 핵심 문서:
+  1. `constant-vus`(반복형) executor가 VU 수를 부풀림(500 VU가 실제로는 이터레이션 4742회) 발견 → `per-vu-iterations`+`iterations:1`로 교체해서 "N명이 각자 한 번씩"을 정확히 재현
+  2. macOS가 TLS 인증서 검증을 블로킹 syscall로 처리해서 VU 수천 개 몰리면 k6 프로세스 자체가 Go 스레드 상한(1만)으로 크래시 — `insecureSkipTLSVerify: true`로 회피
+  3. VU 1만 개 진짜 동시 접속 시 ALB 자체가 TLS negotiation 단계에서 리셋(CloudWatch `ClientTLSNegotiationErrorCount` 분당 6~8천 건 확인, `RejectedConnectionCount`/`TargetConnectionErrorCount`는 0이라 ALB 자체 문제로 특정) — 각 VU 시작 전 `0~RAMP_SECONDS`초 랜덤 대기로 커넥션 개설을 분산시켜 해결
+  4. 🔴 **위 3개를 다 걷어내고 나서 발견한 진짜 서버 문제**: 부하가 심해지면 파드가 헬스체크(backend `/api/actuator/health`, frontend는 무거운 SSR `/`)에도 제때 응답 못 해서 ALB가 로테이션에서 제외 → 남은 파드에 더 몰림 → 도미노로 전부 제외 → `HealthyHostCount=0`(완전 다운)까지 CloudWatch로 실제 재현 확인(20:17 backend/frontend 동시에 0). **미해결** — 다음 세션 최우선 과제로 frontend 헬스체크 경로를 무거운 `/` 대신 전용 엔드포인트로 분리하는 것을 권고
+  5. 부수 발견: ArgoCD `repo-server`가 리소스 request 없음(`BestEffort` QoS)이라 같은 부하 중 자기 헬스체크에도 응답 못 해 재시작당함 — ArgoCD UI가 "connection refused" 뱉은 원인. **미해결**
+- [[troubleshooting/2026-08-18-config-build-bugs]] 신설 — 같은 날 만난 독립적 버그 3건 묶음(2026-08-13 패턴과 동일): `03_registry` output이 존재 안 하는 `module.ses` 참조하던 버그, `notification-config`라는 실체 없는 ConfigMap을 Helm values가 참조해서 backend가 `CreateContainerConfigError`로 못 뜨던 버그(app-config에 이미 필요값 있어서 참조 제거로 해결), backend Dockerfile이 `eclipse-temurin:21-jre`(OS 미고정) → Ubuntu Noble 전환으로 `useradd --uid 1000` 충돌하던 버그(`-jammy` 태그 고정으로 해결, 실제로 `docker run`으로 UID 1000 비어있음 검증)
+- [[decisions/2026-08-18-capacity-planning-large-traffic-readiness]] 갱신 — 4번 권고 실행 결과 반영, backend KEDA `maxReplicas` 8→12·`limits.cpu` 2→3 상향 기록, ALB 연쇄 장애를 이 문서의 분석 프레임(노드/DB/Redis 스펙)으로는 못 잡아내는 새로운 리스크 층위로 명시, "다음 세션에서 이어갈 것" 체크리스트 추가
+- [[architecture/cluster-autoscaler]] 갱신 — 500명 테스트로 3번째 노드 자동 증설, KEDA 4→8 스케일아웃 전부 실전 검증됐음을 기록. 동시에 오토스케일러만으로는 순간 폭증(thundering herd)을 못 막는다는 한계도 명시
+- [[troubleshooting/frontend-cpu-throttling-cfs-quota-vs-jvm-tradeoff]] 갱신 — CPU limit 제거 수정이 한동안 CD 레포에 미배포 상태였다가(로컬 커밋만 있고 push 안 됨) 뒤늦게 배포 완료된 경위 기록 — "코드를 고쳤다고 끝이 아니라 실제 배포까지 확인해야 한다"는 교훈 남김
+- index.md 갱신 — troubleshooting 목록, 고아 페이지 섹션(ALB 헬스체크 연쇄 장애·ArgoCD repo-server를 신규 미해결 최우선 항목으로 등록, backend CPU limit 상향 항목은 해결로 갱신)
+
+**오늘 하루 전체 요약(내일 이어갈 사람을 위해)**: cluster-autoscaler 설치→RDS release 상향→만 명 부하테스트까지 큰 흐름은 다 진행됐고, KEDA/오토스케일러 조합은 실전 검증까지 끝났음. 남은 것 중 제일 급한 건 **ALB 헬스체크 연쇄 장애**(frontend 헬스체크 경로 분리가 직접 해법)와 **ArgoCD repo-server 리소스 request 추가** 둘 다 원인은 찾았고 고치는 방법도 정해졌지만 아직 코드 반영 전. 그다음은 `open_run_10000_with_queue.js`로 대기열이 이 연쇄 장애를 실제로 막아주는지 재검증하는 것.

@@ -67,7 +67,9 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[keda-scaling-missing-metrics-server]] — 부하테스트에서 KEDA(CPU 트리거)가 전혀 스케일 안 함, 원인은 클러스터에 `metrics-server` 자체가 없었던 것(HPA Condition까지 봐야 드러남) — 설치로 해결, replica 4→8 실제 증가 검증
 - [[hikaricp-connection-storm-load-test]] — 부하테스트만 돌리면 ArgoCD/Grafana까지 같이 멈춤, 원인은 RDS가 아니라 HikariCP 풀 과다(40×8replica=320)로 인한 커넥션 생성 시 CPU 폭증이 버스터블(t3.medium) 노드의 CPU 크레딧을 고갈시켜 같은 노드의 다른 파드까지 굶긴 것 — 풀 사이즈 축소로 해결
 - [[backend-cpu-throttling-and-scaling-load-test]] — backend CPU 스로틀링 2단계: 1차는 CPU limit 자체가 작아서(250m/1) 상향으로 해결(500m/2), 2차는 limit 상향 후에도 순간 스로틀링이 남아있는데 KEDA는 정상적으로 안 늘리는 상황을 관찰 — "스로틀링≠평균 사용률" 구조를 확인하고 replica 증설 대신 limit 추가 상향을 권고(**미적용**, 사용자 판단 대기)
-- [[frontend-cpu-throttling-cfs-quota-vs-jvm-tradeoff]] — frontend KEDA 적용 후 유휴 부하에서도 스로틀링 지속 발견, CFS 100ms 쿼터 + Node.js 보조 스레드(GC/libuv/JIT) 버스트가 원인임을 실측(Prometheus 직접 질의)으로 확인 — frontend는 CPU limit을 아예 제거(request만 유지)해서 해결, backend는 JVM 컨테이너 인지 방식(`ActiveProcessorCount` 자동 사이징) 때문에 같은 처방을 안 씀
+- [[frontend-cpu-throttling-cfs-quota-vs-jvm-tradeoff]] — frontend KEDA 적용 후 유휴 부하에서도 스로틀링 지속 발견, CFS 100ms 쿼터 + Node.js 보조 스레드(GC/libuv/JIT) 버스트가 원인임을 실측(Prometheus 직접 질의)으로 확인 — frontend는 CPU limit을 아예 제거(request만 유지)해서 해결, backend는 JVM 컨테이너 인지 방식(`ActiveProcessorCount` 자동 사이징) 때문에 같은 처방을 안 씀. 수정이 한동안 CD 레포에 커밋만 되고 미배포 상태였던 것도 뒤늦게 발견·정리(**해결됨**)
+- [[2026-08-18-config-build-bugs]] — 같은 날 겪은 독립적 설정/빌드 버그 3건: `03_registry` output이 존재하지 않는 `module.ses` 참조하던 문제, `notification-config`라는 실체 없는 ConfigMap을 Helm values가 참조해서 backend가 `CreateContainerConfigError`로 못 뜨던 문제, backend Dockerfile이 Ubuntu Noble 베이스 전환으로 `useradd --uid 1000`이 충돌하던 문제(`-jammy` 태그 고정으로 해결)
+- [[loadtest-10000-open-run-cascading-failures]] — 만 명 규모 오픈런 부하테스트 실행기: k6 클라이언트 함정 3개(`constant-vus`가 VU 수를 부풀리는 문제, macOS TLS 검증이 k6 프로세스를 크래시시키는 문제, VU 1만 개 동시 접속이 ALB TLS negotiation 자체를 실패시키는 문제) 전부 해결하고 나서 발견한 **진짜 서버 문제** — 부하가 심해지면 파드가 헬스체크에도 응답 못 해서 ALB가 로테이션에서 제외, 도미노로 전부 제외되며 HealthyHostCount=0(완전 다운)까지 재현됨. ArgoCD repo-server도 BestEffort QoS라 같은 부하에 굶어 죽는 것도 같이 발견 — **둘 다 미해결, 다음 세션 최우선 과제**
 
 ## runbook/ — 반복 운영 절차
 - [[db-schema-change]] — 로컬 DB 스키마 변경 절차 2가지
@@ -99,6 +101,8 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - EventBridge Scheduler를 이미 만들어둔 팀원이 있다는 메모가 있음 — 실제 용도(리마인더 등) 확인 필요, 확정된 요구사항이 없다면 정리 대상인지 판단 필요 ([[decisions/2026-08-12-sqs-lambda-ses-notification-pipeline]] 참고)
 - 프론트 CI의 Toss 키 fetch가 `team5-qket-external-api-release` 이름으로 하드코딩됨 — prod CI 파이프라인을 만들 때 반드시 갱신 필요 ([[decisions/2026-08-11-frontend-ci-toss-key-secrets-manager]] 참고)
 - [[decisions/2026-08-11-frontend-api-routing-alb-not-rewrites]]로 배포 환경 라우팅은 바뀌었지만, 로컬 개발(`npm run dev`) 환경에서 `/api` 프록시를 어떻게 처리할지는 아직 정리 안 됨(온보딩 문서에도 미반영)
-- [[troubleshooting/backend-cpu-throttling-and-scaling-load-test]]의 2차 권고(backend CPU limit을 2→3~4로 추가 상향) — 아직 `CD/helm/values.yaml`에 미반영, 사용자 판단 대기 중
-- ✅ (대부분 해결, 2026-08-18) [[decisions/2026-08-18-capacity-planning-large-traffic-readiness]] — cluster-autoscaler 설치, RDS release를 `db.t3.medium`으로 상향까지 완료. 여전히 미착수: prod RDS 상향(재측정 후 결정 예정), Redis 용량/HA(사용자가 명시적으로 보류), 목표 동접자 수 기준 장시간 부하테스트 재측정
+- ✅ (해결, 2026-08-18) [[troubleshooting/backend-cpu-throttling-and-scaling-load-test]]의 2차 권고(backend CPU limit 추가 상향) — `CD/helm/values.yaml`의 `backend.resources.limits.cpu`가 `2`→`3`으로 반영됨, `backend.autoscaling.maxReplicas`도 `8`→`12`로 상향됨(만 명 부하테스트 중 CPU가 목표치를 넘어도 8개가 상한이라 못 늘어나는 걸 확인하고 조치)
+- 🔴 (신규, 2026-08-18, 최우선) ALB 타겟그룹 헬스체크 연쇄 장애 — 만 명 부하테스트에서 backend/frontend 둘 다 `HealthyHostCount=0`(완전 다운)까지 재현됨. frontend 헬스체크 경로가 무거운 SSR 페이지(`/`)를 그대로 쓰는 게 직접 원인. [[troubleshooting/loadtest-10000-open-run-cascading-failures]] "문제 4" 참고 — **미해결, 다음 세션에서 이어서**
+- 🔴 (신규, 2026-08-18) ArgoCD `repo-server`가 CPU/메모리 request 없음(BestEffort) — 부하테스트 중 노드가 바빠지자 자기 헬스체크에도 응답 못 해 재시작당함, ArgoCD UI가 일시적으로 "connection refused" 뱉음. [[troubleshooting/loadtest-10000-open-run-cascading-failures]] 참고 — **미해결**
+- ✅ (대부분 해결, 2026-08-18) [[decisions/2026-08-18-capacity-planning-large-traffic-readiness]] — cluster-autoscaler 설치, RDS release를 `db.t3.medium`으로 상향, 500~10000명 규모 재측정까지 진행 완료. 여전히 미착수/미해결: prod RDS 상향(release 결과 보고 결정 예정), Redis 용량/HA(사용자가 명시적으로 보류), RDS 버스터블 크레딧 장시간 소진 시나리오, 위 ALB 헬스체크 연쇄 장애
 - `Infra` PR #15(`feature/nyj`, 모니터링/AMP 작업)가 merge conflict 해결 완료로 `MERGEABLE` 상태까지 갔지만 아직 `dev`로 실제 merge는 안 됨 — 나윤준님 직접 확인 후 merge할지, 바로 merge할지 미결정

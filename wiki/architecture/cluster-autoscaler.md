@@ -33,6 +33,12 @@ EKS 관리형 노드그룹(`modules/eks`의 `aws_eks_node_group`)의 `desired_si
 - 반대로 Karpenter는 기존 "고정 노드그룹 1개" 모델 자체를 재설계해야 해서(NodePool/EC2NodeClass CRD, 인터럽션 큐 등) 지금 규모엔 비용 대비 효과가 안 맞음
 - Cluster Autoscaler는 이미 Terraform에 선언돼 있던 min/max를 그대로 활용하는 가장 낮은 비용의 선택 — ASG 태그도 이미 자동으로 붙어있어서 노드그룹 코드를 한 줄도 안 건드림
 
+## 실전 검증 (2026-08-18)
+
+같은 날 오후 500명 규모 k6 부하테스트 중 실제로 3번째 노드가 자동으로 붙는 걸 확인함(`kubectl get nodes` age가 테스트 시작 시점과 정확히 일치, CPU 요청률도 42%로 시작해서 새 파드를 흡수). KEDA도 같은 테스트에서 backend/frontend를 4→8로 실제 스케일아웃함 — 설계대로 동작함이 실측으로 증명됨.
+
+다만 만 명 규모까지 올리면서 **이 조합(KEDA+Cluster Autoscaler)만으로는 못 막는 문제**도 같이 발견됨 — 순간적으로 트래픽이 다 몰리면 오토스케일러의 반응 지연(수십 초~1분) 동안 기존 최소 replica가 몰빵으로 받아서 느려지는 현상("thundering herd"), 그리고 그게 더 심해지면 ALB 헬스체크 연쇄 장애로 이어지는 것까지 확인됨. 자세한 내용은 [[../troubleshooting/loadtest-10000-open-run-cascading-failures]] 참고 — 오토스케일러는 지속적 트래픽 증가엔 잘 대응하지만, 순간 폭증(오픈런류)엔 그 자체로 충분한 방어책이 아님.
+
 ## 의도적으로 어색하거나 특이한 지점
 
 - **최초 apply 직후 파드가 1번 크래시하는 게 정상** — `AccessDenied: sts:AssumeRoleWithWebIdentity`로 죽었다가 Kubernetes가 자동 재시작하면 바로 정상화됨. IAM Role/ServiceAccount가 막 생성된 직후라 IRSA(OIDC federated AssumeRoleWithWebIdentity) trust policy 전파에 살짝 지연이 있어서 생기는 레이스 — ALB Controller의 admission webhook 레이스([[../troubleshooting/eks-destroy-layer-separation]])와 같은 계열. `02_k8s-addon`을 매일 아침 재적용하는 루틴([[../runbook/daily-infrastructure-toggle]])에서 매번 재현될 수 있으나 재시작 횟수가 1에서 안 늘어나고 `Running`이면 정상이니 조치 불필요
@@ -43,3 +49,4 @@ EKS 관리형 노드그룹(`modules/eks`의 `aws_eks_node_group`)의 `desired_si
 - [[keda-autoscaling]]
 - [[../decisions/2026-08-18-capacity-planning-large-traffic-readiness]]
 - [[../troubleshooting/eks-destroy-layer-separation]]
+- [[../troubleshooting/loadtest-10000-open-run-cascading-failures]]
