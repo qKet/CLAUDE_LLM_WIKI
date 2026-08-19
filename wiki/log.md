@@ -624,3 +624,25 @@ frontend에 KEDA를 적용하는 과정에서 Grafana "CPU 스로틀링" 패널�
 ## [2026-08-19] Claude Code | ingest | frontend#27 revalidate 30→60초 조정, backend#29는 팀원이 별도 해결해 원복
 
 frontend#27을 30초로 반영한 직후 사용자가 1분(60초)으로 재조정 요청 — `app/page.tsx`, `app/events/[performanceId]/page.tsx` 값 수정 후 `Frontend` `feature/jwj-frontend-ssr-cache` 브랜치에 커밋 완료(`7cfccbc`). 같은 대화에서 backend#29는 팀원이 이미 별도로 해결했다는 걸 확인 — Backend/Infra/CD에 반영했던 코드는 전부 `git restore`로 원복(커밋 전이라 안전하게 되돌림). [[troubleshooting/loadtest-10000-open-run-cascading-failures]]의 revalidate 값 언급(30→60)과 브랜치/커밋 정보 갱신.
+
+---
+
+## [2026-08-19] Claude Code | troubleshooting | 2000명/4000명 엔드투엔드 부하테스트 성공, 신규 버그 4건 발견·해결
+
+별도 세션에서 AMP/Grafana 트러블슈팅에 이어 진행된 대규모 부하테스트 작업. 로그인→대기열→좌석선택→예매(결제 제외 — 실제 토스페이먼츠 API 호출이라 자동화 불가) 전체 플로우를 k6로 재현하는 `Infra/loadtest/e2e_reservation_2000.js`를 새로 작성하고 반복 실행하며 아래 4가지를 발견·해결함:
+
+- [[troubleshooting/servicemonitor-actuator-port-mismatch]] 신설 — backend#29(actuator 8081 분리)의 사이드이펙트로 Prometheus ServiceMonitor가 옛 포트를 계속 스크랩 중이던 것 발견, `terraform apply -target`으로 해결
+- [[troubleshooting/queue-max-active-users-bottleneck]] 신설 — 대기열 `MAX_ACTIVE_USERS=10`이 2000명 규모를 전혀 못 버텨서 테스트 내내 아무도 통과 못하던 것 발견, 150으로 상향(backend hotfix, release 배포 후 dev에도 백포트)
+- [[troubleshooting/loadtest-script-response-envelope-gotchas]] 신설 — k6 스크립트가 `GlobalResponseAdvice`의 응답 래핑 규칙(Map은 안 감싸고 DTO/record/List는 `data`로 감쌈)을 몰라서 `queueToken`/`status`가 계속 undefined였던 버그 + 좌석 조회 응답의 `roundId`가 항상 null인 것 발견·우회
+- [[troubleshooting/grafana-avg-response-time-rate-nan-artifact]] 신설 — "평균 응답시간" 패널이 버스트성 저트래픽 엔드포인트에서 `rate()` 나눗셈 불안정으로 20013ms 같은 값을 보여주던 문제, 요청률 하한 필터로 해결
+
+위 4건을 전부 고친 뒤 재검증: **2000명 규모 예매 성공률 99.85%(1997/2000), 4000명 규모(좌석 2000석 그대로, 수요=공급의 2배)에서도 정확히 2000명 성공 + 이중예매 0건** — Redis 분산락(`lock:reservation:{seatId}`)이 대규모 동시 경합에서도 완벽하게 작동함을 실측 확인. 4000명 규모에서 KEDA 스케일업 지연(~3분)이 새 병목으로 관찰됨(로그인 실패 343건이 이 구간에 집중) — [[troubleshooting/loadtest-10000-open-run-cascading-failures]] "2026-08-19 추가 후속" 섹션에 정리, 만 명 테스트 때 봤던 완전 다운은 재현 안 됨.
+
+부하테스트용 계정을 `loadtest0001`~`loadtest4000`(4000개)까지 release DB에 시드함(`Infra/loadtest/seed_test_accounts.sql`) — 회원가입/이메일인증 API를 거치지 않고 DB 직접 INSERT.
+
+- `Infra` PR #24 (fix/nyj-servicemonitor-health-port → dev) 머지 완료
+- `backend` PR #34 (hotfix/nyj-queue-max-active-users → release) 머지 완료 — 배포까지 확인(ArgoCD `qket-cd` 앱이 자동 sync 안 되는 구조라는 것도 이번에 파악, 수동 SYNCHRONIZE 필요)
+- `backend` PR #35 (hotfix/nyj-backport-queue-max-active-users → dev) 머지 완료 — release 반영분 dev 동기화
+- index.md, log.md 갱신
+
+**남은 것**: round_id=18의 2000석은 테스트로 전부 RESERVED된 상태로 남아있음(loadtest 계정 소유) — 다음에 이어서 테스트할 사람은 원복 필요(`UPDATE RESERVATIONS SET user_id=NULL, reserved_status='AVAILABLE', reserved_at=NULL WHERE round_id=18 AND user_id LIKE 'loadtest%'`). 결제 플로우 자체의 부하테스트는 여전히 미수행(토스페이먼츠 실제 API 의존 때문에 구조적으로 어려움 — 필요하면 토스 테스트 모드 연동 검토 필요).

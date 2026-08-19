@@ -170,9 +170,21 @@ fetch(`${BASE_URL}/api/events/${performanceId}`, { cache: "no-store" })
 
 3건 다 우선순위 높음. #27은 같은 날 후속 세션에서 코드 반영까지 끝남(배포는 아직). #28·#29는 아직 — 위 "재발 방지" 섹션의 1번(frontend 헬스체크 경로 분리, #28)과 실질적으로 같은 작업이라 이슈로 트래킹하기로 함. ArgoCD repo-server 리소스 request(2번)는 아직 이슈 미등록.
 
+### 2026-08-19 추가 후속 — 2000명/4000명 엔드투엔드 재검증 성공
+
+같은 날 이어진 별도 세션에서, backend#29가 남긴 후속 문제([[servicemonitor-actuator-port-mismatch]] — Prometheus ServiceMonitor가 옛 포트를 계속 스크랩)와 대기열 자체 병목([[queue-max-active-users-bottleneck]] — `MAX_ACTIVE_USERS=10`)을 새로 찾아 고친 뒤, 결제를 뺀 전체 예매 플로우(로그인→대기열→좌석선택→예매)로 실제 재검증을 돌림.
+
+- **2000명 규모**: 예매 성공 1997/2000(99.85%), 이중예매 0건, 대기열 평균 대기 20.5초
+- **4000명 규모**(좌석은 그대로 2000석 — 수요가 공급의 2배인 오픈런 시나리오): **정확히 2000명 성공**(좌석 수와 일치), 이중예매 0건. 대신 테스트 시작 후 약 3분간 backend replica가 4개에 머물러있다가 12개로 급증하는 **KEDA 스케일업 지연**이 새 병목으로 관찰됨(로그인 실패 343건, 응답시간 튐이 이 구간에 집중) — 이번 10000명 테스트의 완전 다운(HealthyHostCount=0)과는 다른, 훨씬 약한 형태의 초기 버스트 취약점.
+
+즉 이날 특정된 애플리케이션 레벨 원인 2건(actuator 스레드풀 공유, frontend SSR 캐싱 부재) + 대기열 용량 문제까지 고치고 나니, 만 명 규모에서 봤던 "완전 다운"은 재현되지 않았고 남은 건 오토스케일러 반응 지연 수준으로 크게 완화됨. 다만 이번 재검증은 결제(`POST /payments/confirm`, 실제 토스페이먼츠 API 호출이라 자동화 불가)는 제외하고 예매까지만 봤고, 10000명 규모까지 다시 올려서 확인하진 않았음.
+
 ## 관련
 - [[../decisions/2026-08-18-capacity-planning-large-traffic-readiness]]
 - [[../architecture/cluster-autoscaler]]
 - [[../architecture/keda-autoscaling]]
 - [[frontend-cpu-throttling-cfs-quota-vs-jvm-tradeoff]]
 - [[../decisions/2026-08-10-redis-session-queue-shared-instance-risk]]
+- [[servicemonitor-actuator-port-mismatch]]
+- [[queue-max-active-users-bottleneck]]
+- [[loadtest-script-response-envelope-gotchas]]
