@@ -590,3 +590,12 @@ frontend에 KEDA를 적용하는 과정에서 Grafana "CPU 스로틀링" 패널�
   - `02_k8s-addon`에서 새로 생긴 root 간 CRD 순서 문제 발견 — `argocd-notifications-eso.tf`(ArgoCD 알림 이메일 기능 추가하면서 신설, 커밋 `4e7a965`)가 `04_data`의 ESO가 설치하는 `external-secrets.io/v1` CRD를 참조하는데, 확립된 apply 순서(`infrastructure→k8s-addon→data`)와 반대 방향 의존이라 매일 아침 재적용마다 재현될 것으로 예상됨 — 오늘은 `04_data`의 `module.eso`를 먼저 targeted apply해서 우회. **아직 위키 문서화 안 함, 사용자가 문서화 여부 확인 중 다음 요청으로 넘어가서 보류됨**
   - `02_k8s-addon`의 `gavinbunney/kubectl` provider 로컬 캐시 손상(체크섬 불일치) — `.terraform/providers` 삭제 후 재init으로 해결, lock 파일 갱신됨(커밋 필요)
   - Grafana 관리자 비밀번호를 `grafana cli admin reset-admin-password`로 초기화 시도했다가 오히려 admin 계정이 깨짐(Grafana 13.2.0에서 이 CLI가 정상 작동 안 하는 것으로 보임) — Grafana 데이터가 PVC 없이 `emptyDir`(임시 저장소)라는 걸 확인하고 파드를 삭제→재생성해서 Secret 값 기준으로 깨끗하게 복구
+
+---
+
+## [2026-08-19] Claude Code | decision | 대기열 적용 범위 — 예매 플로우만 유지, 홈/상세까지 확장은 보류
+
+이어지는 대화에서 "대기열이 지금 예매할 때만 생기는데 이거 문제 아니냐"는 질문이 나와서 `BookButton.tsx`를 확인 — 대기열(`QueueModal`)이 "예매하기" 클릭 이후에만 뜨고, 홈/로그인/공연상세는 대기열 사각지대임을 코드로 확인. 부하테스트에서 가장 먼저·가장 심하게 무너진 구간(홈 성공률 10%)이 정확히 이 사각지대와 일치한다는 것도 같이 짚음.
+
+- [[decisions/2026-08-19-queue-scope-limited-to-booking-flow]] 신설 — 대기열을 홈까지 확장하는 안(실제 대형 티켓 사이트들의 방식)을 검토했으나, 지금 프로젝트 규모(4인 팀)에서는 과하다고 판단해 **현재 범위 유지로 확정**. 대신 어제 등록한 GitHub 이슈 3건(캐싱, 헬스체크 분리)으로 완화하기로 함. 재검토 트리거(실제 트래픽이 지금 규모를 크게 넘어서면)를 명시적으로 남겨둠
+- index.md 갱신
