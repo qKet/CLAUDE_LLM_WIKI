@@ -3,8 +3,10 @@ title: 만 명 오픈런 부하테스트 — k6 클라이언트 함정 3가지 +
 category: troubleshooting
 tags: [load-test, k6, keda, autoscaling, alb, health-check, cascading-failure, argocd]
 created: 2026-08-18
-updated: 2026-08-18
+updated: 2026-08-19
 ---
+
+> 🔴 2026-08-19: 같은 문제가 그대로 재현됨(당연함 — 아직 미수정) + **애플리케이션 레벨 원인 2개를 추가로 특정**해서 GitHub 이슈 3건 등록함. "문제 4"의 재발 방지 섹션이 인프라 처방(헬스체크 경로/포트 분리)만 얘기했었는데, 실제 코드를 확인해보니 그 문제를 더 키우는 애플리케이션 설정도 같이 있었음. 자세한 내용은 맨 아래 "2026-08-19 후속 — 애플리케이션 레벨 원인 2건 + 이슈 등록" 섹션 참고.
 
 # 만 명 오픈런 부하테스트 — k6 클라이언트 함정 3가지 + ALB 헬스체크 연쇄 장애
 
@@ -111,6 +113,58 @@ Events:
 2. ArgoCD 컴포넌트(특히 repo-server)에 최소 CPU/메모리 request 부여 — `02_k8s-addon/main.tf`의 `helm_release.argocd` values에 `repoServer.resources` 추가
 3. 헬스체크 자체를 더 관대하게(timeout 5→10초, unhealthy threshold 2→더 크게) 튜닝 — 진짜 장애 감지가 느려지는 트레이드오프 있음, 1번이 우선
 4. 근본적으로는 [[../decisions/2026-08-10-redis-session-queue-shared-instance-risk]]와 연결되는 얘기 — 대기열(`open_run_10000_with_queue.js`)을 쓰면 유입 자체가 눌려서 이 연쇄 장애 자체가 원천 봉쇄됨. `no_queue` 버전으로 일부러 대기열 없이 테스트해서 이 문제가 고스란히 드러난 것
+
+## 2026-08-19 후속 — 애플리케이션 레벨 원인 2건 + 이슈 등록
+
+전날 진행 중이던 부하테스트를 이어서 돌리다가 "이거 인프라 문제야 애플리케이션 문제야?"라는 질문을 계기로 코드를 직접 확인함. 처음엔 "인프라 캐파시티/오토스케일러 반응 지연/헬스체크 설정 실수" 계열로만 답했는데, 다시 짚어보니 **"문제 4"를 직접 악화시키는 애플리케이션 레벨 원인 2개**를 놓치고 있었음.
+
+### 추가 발견 A — backend: actuator 헬스체크가 일반 요청과 같은 스레드풀
+
+```yaml
+# application.yml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  # server.port 지정 없음
+```
+
+`management.server.port`를 안 주면 Spring Boot는 actuator(`/api/actuator/health` — ALB 헬스체크가 찌르는 바로 그 경로)를 메인 서버(8080)와 **같은 포트·같은 워커 스레드풀**로 처리함. 그래서 비즈니스 요청이 몰려서 스레드가 꽉 차면, 헬스체크도 같은 줄에 서서 기다리다 5초 타임아웃에 걸림 — "문제 4"의 연쇄 장애가 **일어나기 쉬운 구조를 코드가 직접 만들고 있었음**. `management.server.port`로 분리하면 헬스체크 전용 스레드가 생겨서 비즈니스 트래픽과 완전히 무관하게 항상 즉답 가능해짐(단, 분리하면 K8s Service/ALB 타겟그룹 헬스체크 포트 설정도 같이 바꿔야 함 — Infra 레포 동반 수정 필요).
+
+### 추가 발견 B — frontend: SSR 캐싱이 전부 꺼져있음 (`cache: "no-store"`)
+
+```ts
+// app/page.tsx (홈 — 부하테스트에서 제일 먼저 죽던 그 페이지, 성공률 10%)
+fetch(`${BASE_URL}/api/categories`, { cache: "no-store" })
+fetch(`${BASE_URL}/api/events/paged`, { cache: "no-store" })
+
+// app/events/[performanceId]/page.tsx (상세)
+fetch(`${BASE_URL}/api/events/${performanceId}`, { cache: "no-store" })
+```
+
+카테고리/공연 목록/공연 상세처럼 몇 초~몇 분 단위로도 잘 안 바뀌는 데이터를 매 요청마다 무조건 backend까지 재왕복 + SSR 재렌더링함. 캐싱이 없으니 동시 요청 수가 그대로 backend/렌더링 부하로 직결됨 — "문제 4"에서 홈이 압도적으로 먼저 무너졌던(10%) 이유를 여기서도 설명할 수 있음.
+
+### 정리 — 이날 겪은 문제 중 어디까지가 인프라이고 어디까지가 코드인가
+
+| 원인 | 층위 |
+|---|---|
+| BCrypt가 CPU 많이 씀 | 의도된 설계(보안 트레이드오프) — 버그 아님 |
+| KEDA `maxReplicas` 상한, 노드 캐파시티 부족 | 인프라 캐파시티 |
+| ALB 헬스체크 연쇄 장애 구조 자체(타임아웃/threshold 설정) | 인프라 설정 |
+| **backend actuator가 일반 요청과 스레드풀 공유** | **애플리케이션 설정(신규 발견)** |
+| **frontend SSR 캐싱 없음** | **애플리케이션 설정(신규 발견)** |
+| frontend가 backend 호출 실패 시 재시도 없음 | 애플리케이션 방어 코드 부재(경미, 근본 원인은 아님) |
+
+결론: 이날 장애의 다수는 인프라(캐파시티/오토스케일러 한계)가 맞지만, **그 위에서 장애를 실제로 촉발·악화시킨 직접 방아쇠는 애플리케이션 설정 2건**이었음. "인프라만 고치면 된다"고 단정하면 안 됨 — 코드 쪽도 같이 봐야 함.
+
+### GitHub 이슈 등록함 (팀 협업용, 2026-08-19)
+
+- [qKet/frontend#27](https://github.com/qKet/frontend/issues/27) — SSR 페이지 캐싱 추가 (`no-store` → `revalidate`)
+- [qKet/frontend#28](https://github.com/qKet/frontend/issues/28) — ALB 헬스체크용 전용 엔드포인트 신설 (지금은 무거운 SSR `/` 그대로 씀)
+- [qKet/backend#29](https://github.com/qKet/backend/issues/29) — actuator 헬스체크를 별도 포트로 분리
+
+3건 다 우선순위 높음, 아직 코드 반영 전 — 위 "재발 방지" 섹션의 1번(frontend 헬스체크 경로 분리)과 실질적으로 같은 작업이라 이슈로 트래킹하기로 함. ArgoCD repo-server 리소스 request(2번)는 아직 이슈 미등록.
 
 ## 관련
 - [[../decisions/2026-08-18-capacity-planning-large-traffic-readiness]]

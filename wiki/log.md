@@ -571,3 +571,22 @@ frontend에 KEDA를 적용하는 과정에서 Grafana "CPU 스로틀링" 패널�
 - index.md 갱신 — troubleshooting 목록, 고아 페이지 섹션(ALB 헬스체크 연쇄 장애·ArgoCD repo-server를 신규 미해결 최우선 항목으로 등록, backend CPU limit 상향 항목은 해결로 갱신)
 
 **오늘 하루 전체 요약(내일 이어갈 사람을 위해)**: cluster-autoscaler 설치→RDS release 상향→만 명 부하테스트까지 큰 흐름은 다 진행됐고, KEDA/오토스케일러 조합은 실전 검증까지 끝났음. 남은 것 중 제일 급한 건 **ALB 헬스체크 연쇄 장애**(frontend 헬스체크 경로 분리가 직접 해법)와 **ArgoCD repo-server 리소스 request 추가** 둘 다 원인은 찾았고 고치는 방법도 정해졌지만 아직 코드 반영 전. 그다음은 `open_run_10000_with_queue.js`로 대기열이 이 연쇄 장애를 실제로 막아주는지 재검증하는 것.
+
+---
+
+## [2026-08-19] Claude Code | troubleshooting | ALB 연쇄 장애 재현 + 애플리케이션 레벨 원인 2건 특정, GitHub 이슈 3건 등록
+
+전날 미해결로 남겨뒀던 [[troubleshooting/loadtest-10000-open-run-cascading-failures]]의 "문제 4"(ALB 헬스체크 연쇄 장애)가 오늘 부하테스트 재개하자마자 그대로 재현됨(backend 타겟그룹 healthy 8/draining 6/unhealthy 4). 여기에 frontend가 OOMKilled(메모리 limit 256Mi 부족)되는 신규 증상도 같이 관찰됨.
+
+- 사용자가 "이거 인프라 문제야 애플리케이션 문제야?"라고 물어서 처음엔 "인프라(캐파시티+설정 실수+오토스케일러 반응 지연)가 대부분"이라고 답했는데, 되짚어 코드를 실제로 확인해보니 그 답이 불완전했음을 인정하고 재조사:
+  - **backend**: `application.yml`에 `management.server.port` 지정이 없어서 actuator 헬스체크가 일반 요청과 같은 워커 스레드풀을 씀 — 부하 몰리면 헬스체크도 같이 타임아웃나서 연쇄 장애를 코드가 직접 조장하고 있었음
+  - **frontend**: 홈(`app/page.tsx`)과 상세(`app/events/[performanceId]/page.tsx`) 둘 다 `fetch(..., { cache: "no-store" })`로 캐싱이 전부 꺼져있어서, 안 바뀌는 데이터(카테고리/공연목록/상세)도 매 요청마다 backend 재왕복+SSR 재렌더링 — 홈이 부하테스트에서 제일 먼저 무너졌던(10% 성공률) 이유를 코드로 설명 가능해짐
+- [[troubleshooting/loadtest-10000-open-run-cascading-failures]] "2026-08-19 후속" 섹션 추가 — 위 2건 상세 + "이날 문제 중 어디까지가 인프라/코드인가" 표 정리
+- 사용자가 "팀원들과 협업할 수 있게 정리만 해달라(당장 고치지 말고)"고 요청 → GitHub 이슈 3건 등록(각각 원인/증거/제안 포함):
+  - [qKet/frontend#27](https://github.com/qKet/frontend/issues/27) SSR 캐싱 추가
+  - [qKet/frontend#28](https://github.com/qKet/frontend/issues/28) 헬스체크 전용 엔드포인트 신설
+  - [qKet/backend#29](https://github.com/qKet/backend/issues/29) actuator 헬스체크 포트 분리
+- 그 외 오늘 처리한 것(비교적 사소):
+  - `02_k8s-addon`에서 새로 생긴 root 간 CRD 순서 문제 발견 — `argocd-notifications-eso.tf`(ArgoCD 알림 이메일 기능 추가하면서 신설, 커밋 `4e7a965`)가 `04_data`의 ESO가 설치하는 `external-secrets.io/v1` CRD를 참조하는데, 확립된 apply 순서(`infrastructure→k8s-addon→data`)와 반대 방향 의존이라 매일 아침 재적용마다 재현될 것으로 예상됨 — 오늘은 `04_data`의 `module.eso`를 먼저 targeted apply해서 우회. **아직 위키 문서화 안 함, 사용자가 문서화 여부 확인 중 다음 요청으로 넘어가서 보류됨**
+  - `02_k8s-addon`의 `gavinbunney/kubectl` provider 로컬 캐시 손상(체크섬 불일치) — `.terraform/providers` 삭제 후 재init으로 해결, lock 파일 갱신됨(커밋 필요)
+  - Grafana 관리자 비밀번호를 `grafana cli admin reset-admin-password`로 초기화 시도했다가 오히려 admin 계정이 깨짐(Grafana 13.2.0에서 이 CLI가 정상 작동 안 하는 것으로 보임) — Grafana 데이터가 PVC 없이 `emptyDir`(임시 저장소)라는 걸 확인하고 파드를 삭제→재생성해서 Secret 값 기준으로 깨끗하게 복구
