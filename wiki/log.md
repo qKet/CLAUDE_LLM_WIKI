@@ -599,3 +599,22 @@ frontend에 KEDA를 적용하는 과정에서 Grafana "CPU 스로틀링" 패널�
 
 - [[decisions/2026-08-19-queue-scope-limited-to-booking-flow]] 신설 — 대기열을 홈까지 확장하는 안(실제 대형 티켓 사이트들의 방식)을 검토했으나, 지금 프로젝트 규모(4인 팀)에서는 과하다고 판단해 **현재 범위 유지로 확정**. 대신 어제 등록한 GitHub 이슈 3건(캐싱, 헬스체크 분리)으로 완화하기로 함. 재검토 트리거(실제 트래픽이 지금 규모를 크게 넘어서면)를 명시적으로 남겨둠
 - index.md 갱신
+
+---
+
+## [2026-08-19] Claude Code | troubleshooting | frontend#27(SSR 캐싱) + backend#29(actuator 포트 분리) 코드 반영
+
+같은 날 앞선 세션이 등록해둔 GitHub 이슈 3건 중 frontend#27·backend#29 두 건을 실제로 코드 반영함(frontend#28은 팀원이 별도 진행 중이라 이 세션에서 제외). 두 이슈 모두 "배경/문제/제안"이 이미 구체적으로 작성돼 있어서 그 제안을 그대로 구현.
+
+- **frontend#27** — `Frontend/app/page.tsx`(카테고리/공연목록 fetch 2건), `Frontend/app/events/[performanceId]/page.tsx`(상세 fetch 1건)의 `cache: "no-store"`를 `next: { revalidate: 30 }`로 교체. 30초는 이슈에 적힌 예시값 그대로 채택 — 실제 데이터 변경 주기에 맞춰 팀 논의로 조정 가능.
+- **backend#29** — `management.server.port: 8081`을 `application.yml`에 추가하는 것만으로 안 끝나고 4개 레포 동반 수정이 필요했음:
+  - `Backend/src/main/resources/application.yml` — `management.server.port: 8081`
+  - `Backend/Dockerfile` — `EXPOSE 8081`
+  - `Infra/02_k8s-addon/main.tf` — backend Ingress에 `alb.ingress.kubernetes.io/healthcheck-port: "8081"` 추가(target-type=ip라 기본값 traffic-port(8080) 대신 명시적으로 오버라이드해야 함)
+  - `CD/helm/templates/backend-deployment.yaml` — containerPort 8081 추가, Service에 `actuator` 포트(8081→8081) 추가
+  - `CD/helm/templates/networkpolicy.yaml` + `CD/helm/values.yaml` — `networkPolicy.port`(단일값)를 `networkPolicy.ports`(리스트)로 바꿔서 8081도 allow (ALB의 target-type=ip 헬스체크 트래픽이 이 NetworkPolicy 적용 대상인지 100% 확신은 못 해서, 8080과 동일하게 방어적으로 열어둠 — 실제로 필요 없더라도 해될 것 없음)
+- `helm template`(release+prod values 둘 다)과 `terraform validate`(02_k8s-addon)로 렌더링·문법 검증 완료. **네 레포 다 코드 수정만 하고 커밋은 안 함**(frontend/backend/Infra/CD는 팀원이 직접 commit/push하는 레포라 CLAUDE.md 규칙대로 그대로 둠) — 실제 커밋·CI 빌드·ArgoCD sync·배포 후 재검증은 다음 단계.
+- [[troubleshooting/loadtest-10000-open-run-cascading-failures]] "2026-08-19 후속" 섹션의 발견 A/B 밑에 반영 내용 추가, 상단에 🟢 배지 추가, 맨 아래 이슈 목록에 상태 갱신
+- `wiki/index.md` 갱신 — 72번째 줄(개요 요약)과 105번째 줄(미해결 목록) 상태 갱신, backend#29는 ✅ 해결로 옮기고 frontend#28은 "팀원이 별도 진행 중"으로 남김
+
+**다음에 이어갈 것**: frontend/backend/Infra/CD 4개 레포 각각 커밋+push, CI 빌드로 새 이미지 나오면 `values.yaml`의 image 태그 갱신 → ArgoCD sync → 배포 후 (1) ALB 타겟그룹 헬스체크가 실제로 8081로 붙는지 AWS 콘솔/CLI로 확인 (2) 부하테스트 재실행해서 홈 성공률 개선 여부와 연쇄 장애 재발 여부 검증. frontend#28(헬스체크 전용 엔드포인트)은 팀원 작업 완료되면 같이 재검증.
