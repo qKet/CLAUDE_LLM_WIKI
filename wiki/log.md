@@ -618,3 +618,9 @@ frontend에 KEDA를 적용하는 과정에서 Grafana "CPU 스로틀링" 패널�
 - `wiki/index.md` 갱신 — 72번째 줄(개요 요약)과 105번째 줄(미해결 목록) 상태 갱신, backend#29는 ✅ 해결로 옮기고 frontend#28은 "팀원이 별도 진행 중"으로 남김
 
 **다음에 이어갈 것**: frontend/backend/Infra/CD 4개 레포 각각 커밋+push, CI 빌드로 새 이미지 나오면 `values.yaml`의 image 태그 갱신 → ArgoCD sync → 배포 후 (1) ALB 타겟그룹 헬스체크가 실제로 8081로 붙는지 AWS 콘솔/CLI로 확인 (2) 부하테스트 재실행해서 홈 성공률 개선 여부와 연쇄 장애 재발 여부 검증. frontend#28(헬스체크 전용 엔드포인트)은 팀원 작업 완료되면 같이 재검증.
+
+---
+
+## [2026-08-19] Claude Code | ingest | frontend#27 revalidate 30→60초 조정, backend#29는 팀원이 별도 해결해 원복
+
+frontend#27을 30초로 반영한 직후 사용자가 1분(60초)으로 재조정 요청 — `app/page.tsx`, `app/events/[performanceId]/page.tsx` 값 수정 후 `Frontend` `feature/jwj-frontend-ssr-cache` 브랜치에 커밋 완료(`7cfccbc`). 같은 대화에서 backend#29는 팀원이 이미 별도로 해결했다는 걸 확인 — Backend/Infra/CD에 반영했던 코드는 전부 `git restore`로 원복(커밋 전이라 안전하게 되돌림). [[troubleshooting/loadtest-10000-open-run-cascading-failures]]의 revalidate 값 언급(30→60)과 브랜치/커밋 정보 갱신.

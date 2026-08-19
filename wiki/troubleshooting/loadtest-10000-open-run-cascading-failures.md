@@ -8,7 +8,7 @@ updated: 2026-08-19
 
 > 🔴 2026-08-19: 같은 문제가 그대로 재현됨(당연함 — 아직 미수정) + **애플리케이션 레벨 원인 2개를 추가로 특정**해서 GitHub 이슈 3건 등록함. "문제 4"의 재발 방지 섹션이 인프라 처방(헬스체크 경로/포트 분리)만 얘기했었는데, 실제 코드를 확인해보니 그 문제를 더 키우는 애플리케이션 설정도 같이 있었음. 자세한 내용은 맨 아래 "2026-08-19 후속 — 애플리케이션 레벨 원인 2건 + 이슈 등록" 섹션 참고.
 >
-> 🟢 2026-08-19(같은 날 후속 세션): 위 이슈 중 **frontend#27(SSR 캐싱), backend#29(actuator 포트 분리) 코드 반영 완료** — 상세는 "2026-08-19 후속" 섹션의 각 발견 항목 하단 참고. frontend#28(헬스체크 전용 엔드포인트)은 팀원이 별도 진행 중이라 이 세션에서 손 안 댐.
+> 🟢 2026-08-19(같은 날 후속 세션): 위 이슈 중 **frontend#27(SSR 캐싱, `revalidate: 60`) 코드 반영 완료**(`Frontend` `feature/jwj-frontend-ssr-cache`, 커밋 `7cfccbc`). **backend#29(actuator 포트 분리)는 한때 이 세션이 코드 반영했다가, 팀원이 이미 별도로 진행 중임을 확인하고 원복함** — 상세는 "2026-08-19 후속" 섹션의 각 발견 항목 하단 참고. frontend#28(헬스체크 전용 엔드포인트)도 팀원이 별도 진행 중이라 이 세션에서 손 안 댐.
 
 # 만 명 오픈런 부하테스트 — k6 클라이언트 함정 3가지 + ALB 헬스체크 연쇄 장애
 
@@ -134,14 +134,7 @@ management:
 
 `management.server.port`를 안 주면 Spring Boot는 actuator(`/api/actuator/health` — ALB 헬스체크가 찌르는 바로 그 경로)를 메인 서버(8080)와 **같은 포트·같은 워커 스레드풀**로 처리함. 그래서 비즈니스 요청이 몰려서 스레드가 꽉 차면, 헬스체크도 같은 줄에 서서 기다리다 5초 타임아웃에 걸림 — "문제 4"의 연쇄 장애가 **일어나기 쉬운 구조를 코드가 직접 만들고 있었음**. `management.server.port`로 분리하면 헬스체크 전용 스레드가 생겨서 비즈니스 트래픽과 완전히 무관하게 항상 즉답 가능해짐(단, 분리하면 K8s Service/ALB 타겟그룹 헬스체크 포트 설정도 같이 바꿔야 함 — Infra 레포 동반 수정 필요).
 
-> 🟢 **2026-08-19 코드 반영 완료(배포 대기)** — 4개 레포 동반 수정:
-> - `backend/src/main/resources/application.yml` — `management.server.port: 8081` 추가
-> - `backend/Dockerfile` — `EXPOSE 8081` 추가(문서용 메타데이터)
-> - `Infra/02_k8s-addon/main.tf` — backend Ingress에 `alb.ingress.kubernetes.io/healthcheck-port: "8081"` 애노테이션 추가(target-type=ip라 pod IP:8081로 직접 헬스체크가 붙음, 기본값 traffic-port(8080)를 오버라이드)
-> - `CD/helm/templates/backend-deployment.yaml` — container에 `8081(actuator)` 포트 추가, Service에 `8081→8081` 포트 추가
-> - `CD/helm/templates/networkpolicy.yaml` + `CD/helm/values.yaml` — `networkPolicy.port`(단일값) → `networkPolicy.ports`(리스트, `[8080, 8081]`)로 변경해 8081도 허용
->
-> `helm template`/`terraform validate`로 렌더링·문법 검증까지 확인함. **아직 CI 빌드+ArgoCD sync는 안 됨 — 실제 배포 후 ALB 타겟그룹 헬스체크가 8081로 붙는지, 부하테스트로 연쇄 장애가 재현 안 되는지 재검증 필요.**
+> 🟡 **2026-08-19**: 이 세션이 한때 `application.yml`(`management.server.port: 8081`) + `Dockerfile` + `Infra/02_k8s-addon/main.tf`(healthcheck-port 애노테이션) + `CD/helm`(Service·NetworkPolicy 8081 반영) 4개 레포에 코드 반영(`helm template`/`terraform validate` 검증까지 완료)했으나, **팀원이 이 이슈를 이미 별도로 진행 중임을 확인하고 중복 작업 방지를 위해 전부 원복함**(커밋 전이라 `git restore`로 안전하게 되돌림). 실제 구현은 팀원 쪽 진행 상황을 따를 것 — 필요한 수정 지점(4개 레포, 위와 동일한 위치)만 기록으로 남겨둠.
 
 ### 추가 발견 B — frontend: SSR 캐싱이 전부 꺼져있음 (`cache: "no-store"`)
 
@@ -156,7 +149,7 @@ fetch(`${BASE_URL}/api/events/${performanceId}`, { cache: "no-store" })
 
 카테고리/공연 목록/공연 상세처럼 몇 초~몇 분 단위로도 잘 안 바뀌는 데이터를 매 요청마다 무조건 backend까지 재왕복 + SSR 재렌더링함. 캐싱이 없으니 동시 요청 수가 그대로 backend/렌더링 부하로 직결됨 — "문제 4"에서 홈이 압도적으로 먼저 무너졌던(10%) 이유를 여기서도 설명할 수 있음.
 
-> 🟢 **2026-08-19 코드 반영 완료(배포 대기)** — `app/page.tsx`(카테고리/공연목록 fetch 2건), `app/events/[performanceId]/page.tsx`(상세 fetch 1건) 전부 `cache: "no-store"` → `next: { revalidate: 30 }`로 교체. 30초는 이슈의 예시값을 그대로 채택 — 공연/카테고리 데이터가 실제로 얼마나 자주 바뀌는지에 따라 팀 논의로 조정 가능. **아직 배포 전 — 부하테스트로 홈 성공률이 실제로 개선되는지 재검증 필요.**
+> 🟢 **2026-08-19 코드 반영 완료(배포 대기)** — `app/page.tsx`(카테고리/공연목록 fetch 2건), `app/events/[performanceId]/page.tsx`(상세 fetch 1건) 전부 `cache: "no-store"` → `next: { revalidate: 60 }`로 교체. 처음엔 이슈의 예시값(30초)으로 반영했다가, 팀 논의 후 1분으로 조정함 — 공연/카테고리 데이터 변경 주기에 따라 추후 다시 조정 가능. `Frontend` `feature/jwj-frontend-ssr-cache` 브랜치에 커밋 완료(`7cfccbc`). **아직 배포 전 — 부하테스트로 홈 성공률이 실제로 개선되는지 재검증 필요.**
 
 ### 정리 — 이날 겪은 문제 중 어디까지가 인프라이고 어디까지가 코드인가
 
@@ -175,9 +168,9 @@ fetch(`${BASE_URL}/api/events/${performanceId}`, { cache: "no-store" })
 
 - [qKet/frontend#27](https://github.com/qKet/frontend/issues/27) — SSR 페이지 캐싱 추가 (`no-store` → `revalidate`) — 🟢 2026-08-19 코드 반영 완료(배포 대기)
 - [qKet/frontend#28](https://github.com/qKet/frontend/issues/28) — ALB 헬스체크용 전용 엔드포인트 신설 (지금은 무거운 SSR `/` 그대로 씀) — 팀원이 별도 진행 중
-- [qKet/backend#29](https://github.com/qKet/backend/issues/29) — actuator 헬스체크를 별도 포트로 분리 — 🟢 2026-08-19 코드 반영 완료(배포 대기, Infra/CD 동반 수정)
+- [qKet/backend#29](https://github.com/qKet/backend/issues/29) — actuator 헬스체크를 별도 포트로 분리 — 🟡 팀원이 별도 진행 중(이 세션이 반영했던 코드는 중복 방지로 원복)
 
-3건 다 우선순위 높음. #27·#29는 같은 날 후속 세션에서 코드 반영까지 끝남(배포는 아직) — 위 "재발 방지" 섹션의 1번(frontend 헬스체크 경로 분리, #28)과 실질적으로 같은 작업이라 이슈로 트래킹하기로 함. ArgoCD repo-server 리소스 request(2번)는 아직 이슈 미등록.
+3건 다 우선순위 높음. #27은 같은 날 후속 세션에서 코드 반영까지 끝남(배포는 아직). #28·#29는 팀원이 각자 별도 진행 중 — 위 "재발 방지" 섹션의 1번(frontend 헬스체크 경로 분리, #28)과 실질적으로 같은 작업이라 이슈로 트래킹하기로 함. ArgoCD repo-server 리소스 request(2번)는 아직 이슈 미등록.
 
 ## 관련
 - [[../decisions/2026-08-18-capacity-planning-large-traffic-readiness]]
