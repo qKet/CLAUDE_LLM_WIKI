@@ -84,6 +84,17 @@ release/prod 분리) 구조에 `count`/삼항식 분기가 여러 곳(`module.rd
   실제로 읽으려면 `03_registry`를 먼저 apply해야 함 — apply 순서: `03_registry` → (아침 인프라 기동
   후) `04_data/release`.
 
+### 2026-08-21 추가 — backend→SQS 인라인 정책을 modules/sqs 안으로 통합
+
+`04_data/release`/`04_data/prod` 양쪽에 똑같이 반복되던 `aws_iam_role_policy`(백엔드 IRSA 역할에
+SendMessage 권한 부여) 블록을 처음엔 새 모듈(`modules/backend_sqs_permission`)로 뽑았다가, "IAM은
+새 모듈 폴더가 아니라 관련 리소스의 같은 모듈 폴더 안 `iam.tf`로 분리하는 게 이 레포 컨벤션 아니냐"는
+지적을 받고 `modules/sqs/iam.tf`로 재배치함(`alb-controller`/`external-dns`/`cluster-autoscaler`가
+`iam.tf`+`main.tf`로 나뉜 것과 같은 패턴). `modules/sqs`에 `sender_role_name`(선택, 기본 빈 문자열)
+변수를 추가해서, 넘기면 그 역할에 SendMessage 권한을 큐 모듈 스스로 만들어줌 — 큐 이름(`var.name`)이
+이미 유일해서 별도 접미사 변수도 필요 없어짐. release는 실제 살아있는 리소스라 `terraform state mv`로
+새 주소(`module.open_alert_queue.aws_iam_role_policy.sender[0]` 등)로 옮겨서 재생성 없이 이어지게 함.
+
 ## 관련
 - [[2026-08-21-release-datastore-rds-to-statefulset]]
 - [[../architecture/terraform-platform-workload-split]]
