@@ -720,3 +720,15 @@ Gateway API 마이그레이션(release+prod+admin 컷오버) 완료 직후, `Inf
 - [[troubleshooting/backend-cold-start-cpu-contention-during-rollout]] 신설 — 위 설정 변경이 트리거한 전체 롤링배포 중, 여러 신규 파드가 한 노드에 몰려서 뜨며 readiness probe가 대거 실패 → `HealthyHostCount`가 18:08 한 순간 1로 붕괴 → 마침 그 순간과 겹친 로그인 요청들이 대량 실패(성공률 57%)로 이어진 걸 CloudWatch로 인과관계까지 확인
 - [[troubleshooting/queue-max-active-users-bottleneck]]에 후속 노트 추가 — 로컬에 체크아웃돼있던 다른 브랜치 파일만 보고 "MAX_ACTIVE_USERS가 다시 10으로 돌아갔나?" 착각할 뻔했다가 `origin/release`를 직접 확인해서 150이 맞게 반영돼있음을 재확인(교훈: 로컬 체크아웃 브랜치 ≠ 실제 배포 브랜치). DB 커넥션 여유가 120→240으로 늘어난 만큼 150도 재계산 여지가 있다는 논의는 사용자가 "다음에"로 보류
 - CD 레포(`values.yaml`) 변경은 커밋/푸시 안 함 — 사용자가 직접 처리하기로 함(다른 Qket 코드 레포와 동일한 원칙)
+
+---
+
+## [2026-08-21] Claude Code | decision | release DB/Redis를 RDS/ElastiCache → dev-datastore StatefulSet으로 전환
+
+[[decisions/2026-08-21-release-datastore-rds-to-statefulset]] 신설. 비용/관리 부담으로 release는 RDS/ElastiCache를 아예 안 만들기로 하고, 기존에 "앱 동작 확인용"으로만 떠있던 `dev-datastore`(EBS StatefulSet MySQL/Redis)를 release의 유일한 DB/Redis로 승격. 사용자가 release 현재 RDS/ElastiCache 데이터 삭제에 명시 동의(2026-08-21, "응 삭제해도 돼").
+
+- `04_data/main.tf`: `env_config_map`에 `use_managed_datastore`(release=false, prod=true) 추가, `module.rds`/`module.redis`에 `count` 적용 — 이 레포 최초의 환경별 조건부 모듈 생성 패턴. `kubernetes_config_map.app_config`/`module.eso`/`04_data/outputs.tf`는 전부 삼항식(`try()` 포함)으로 분기해서 count=0일 때도 안전하게 fallback
+- **`modules/addons/eso`는 코드 한 글자도 안 건드림** — `db-secrets`/`redis-secrets`를 계속 ESO가 관리하되, 호출부에서 넘기는 `rds_master_user_secret_arn`/`rds_endpoint`/`redis_endpoint`만 release일 때 dev-datastore 쪽 값으로 바꿔치기. 신규 `aws_secretsmanager_secret.dev_mysql_root`(03_registry)를 RDS 마스터 시크릿과 동일한 `{username, password}` JSON 모양으로 맞춰서 ESO의 기존 `remoteRef.property` 매핑을 그대로 재사용
+- MySQL root 비밀번호를 `02_k8s-addon`(매일 밤 destroy/재생성)의 `random_password`에서 `03_registry`(영구 싱글턴)로 이전 — 기존엔 MySQL 데이터(EBS, 영구보존)와 Terraform이 아는 비밀번호가 둘째 날부터 어긋나는 드리프트 버그가 잠재해있었음(컨테이너가 기존 데이터 디렉터리 있으면 `MYSQL_ROOT_PASSWORD` 재반영 안 함). `ignore_changes`로 보호(`external_api_keys`와 같은 패턴)
+- 부수 정리: `dev-datastore` 모듈이 자체 `random_password` 생성을 그만두면서 `02_k8s-addon`에서 `random` provider 제거, `03_registry`에 새로 추가
+- `terraform validate`는 3개 root(03_registry/02_k8s-addon/04_data) 전부 통과. count=0 모듈을 삼항식으로 참조해도 안전한지 별도 샌드박스(`var.enabled ? module.thing[0].id : "fallback"`)로 실증 확인. 다만 `01_infrastructure`가 지금(야간) destroy돼있어 `04_data`의 실제 `terraform plan`은 이번 세션에서 못 돌려봄 — **다음 아침 인프라 기동 후 plan/apply로 최종 검증 필요**
