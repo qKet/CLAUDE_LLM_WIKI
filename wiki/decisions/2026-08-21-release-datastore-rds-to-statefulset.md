@@ -34,8 +34,9 @@ RDS/ElastiCache를 아예 만들지 않기로 함. `prod`는 그대로 진짜 RD
 처음엔 `module.eso`(ESO)를 그대로 재사용해서(ARN만 dev_mysql_root로 바꿔치기) `db-secrets`/`redis-secrets`를 만들었는데, 다시 검토하면서 RDS와 dev-mysql의 근본적 차이(RDS는 자동 로테이션이 있어 ESO의 주기적 재동기화가 실제로 의미 있지만, dev-mysql은 `ignore_changes`로 보호돼 있어 애초에 절대 안 바뀜)를 짚고 아래처럼 바꿈:
 
 - `modules/addons/eso`에 `manage_db_redis_secrets`(기본 true) 변수 추가 — false면 `connection` 시크릿과 `external_secret_db`/`external_secret_redis`를 아예 안 만듦(external-api-secrets는 이 플래그와 무관하게 계속 관리 — 콘솔에서 수동 로테이션한 값을 ESO가 자동으로 반영해주는 실사용 워크플로우가 있어서).
-- `04_data/release`는 `manage_db_redis_secrets = false`로 호출하고, `db-secrets`는 `data "aws_secretsmanager_secret_version"`(02_k8s-addon의 dev-mysql 컨테이너 시크릿과 같은 패턴) + plain `kubernetes_secret`으로 직접 생성. **DB_HOST 키는 이 Secret에 안 넣음** — CD 쪽에서 `dev-mysql`/`dev-redis`를 하드코딩하기로 함(호스트명이 고정값이라 Secrets Manager를 거칠 이유가 없음).
-- **`redis-secrets`는 release에서 아예 안 만듦** — dev-redis는 애초에 인증(비밀번호) 자체가 없어서 이 Secret엔 원래 REDIS_HOST 하나만 있었는데, 그마저 CD 하드코딩으로 옮기면 담을 값이 없어짐. **CD 쪽에서 `backend.secrets` 목록에서 `redis-secrets`를 빼고 `DB_HOST`/`REDIS_HOST`를 하드코딩해야 함(미착수, 사용자가 직접 처리 예정)** — 안 하면 release 배포 시 파드가 존재하지 않는 Secret을 참조해서 못 뜰 위험 있음.
+- `04_data/release`는 `manage_db_redis_secrets = false`로 호출하고, `db-secrets`는 `data "aws_secretsmanager_secret_version"`(02_k8s-addon의 dev-mysql 컨테이너 시크릿과 같은 패턴) + plain `kubernetes_secret`으로 직접 생성. **DB_HOST 키는 이 Secret에 안 넣음.**
+- **DB_HOST/REDIS_HOST는 `kubernetes_config_map.app_config`(`DB_PORT`/`DB_NAME`/`REDIS_PORT`가 이미 있던 그 ConfigMap)에 `"dev-mysql"`/`"dev-redis"` 고정값으로 그대로 추가**(2026-08-21 정정 — 처음엔 "CD에서 하드코딩" 방향으로 얘기했다가, `app-config`가 이미 CD의 `configMaps` 목록에 들어있어서 **CD 코드를 전혀 안 건드리고** Terraform 쪽에서만 끝낼 수 있다는 걸 확인하고 변경).
+- **`redis-secrets`는 release에서 아예 안 만듦** — dev-redis는 애초에 인증(비밀번호) 자체가 없어서 이 Secret엔 원래 REDIS_HOST 하나만 있었는데, 그마저 ConfigMap으로 옮기면 담을 값이 없어짐. **CD 쪽에서 `backend.secrets` 목록에서 `redis-secrets`만 빼면 됨(미착수, 사용자가 직접 처리 예정)** — 안 하면 release 배포 시 파드가 존재하지 않는 Secret을 참조해서 못 뜰 위험 있음.
 
 ## 고려한 대안
 
