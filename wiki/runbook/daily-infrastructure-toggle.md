@@ -35,24 +35,18 @@ terraform -chdir=01_infrastructure destroy \
 
 ### 아침 — 켜기
 
-> ⚠️ 2026-08-18~20 **매일 아침 3일 연속** 아래 두 CRD 에러를 겪음 — `02_k8s-addon`을 밤새 destroy했다가 처음부터 다시 apply하는 거라, CRD를 쓰는 리소스가 plan/apply 시점에 그 CRD가 아직 없어서 실패하는 게 매번 재현됨. 순서를 아래처럼 안 지키면 무조건 남 — 자세한 원인은 [[../troubleshooting/crd-not-yet-installed-on-fresh-apply]] 참고.
+> ⚠️ 2026-08-18~20 **매일 아침 3일 연속** ServiceMonitor CRD 에러를 겪었었으나(`kubernetes_manifest`가 plan 시점에 CRD 존재를 요구), 2026-08-20 `module.backend_servicemonitor`를 helm_release 기반으로 전환하면서 **더 이상 안 겪음** — 아래 `module.monitoring` 선(先)적용 스텝은 그래서 삭제함. SecretStore/ExternalSecret 쪽(`module.argocd_notifications_secrets`)도 같은 날 helm_release로 전환했지만, 그건 **다른 root(04_data)의 ESO CRD**에 걸린 cross-root 문제라 아래 `module.eso` 선적용은 여전히 필요함. 자세한 원인/차이는 [[../troubleshooting/crd-not-yet-installed-on-fresh-apply]]와 [[../decisions/2026-08-20-ingress-to-gateway-api-migration]] 참고.
 
 ```bash
 terraform -chdir=01_infrastructure apply
 
-# 02_k8s-addon 전체 apply 전에, 그 안의 module.monitoring만 먼저 apply해서
-# ServiceMonitor CRD(monitoring.coreos.com)를 깔아둬야 함 — 안 그러면
-# kubernetes_manifest.backend_service_monitor가 "no matches for kind
-# ServiceMonitor"로 실패함 (CRD도 이 root가 같이 까는데, 같은 apply 안에서
-# plan이 그 CRD를 먼저 요구해버림).
-terraform -chdir=02_k8s-addon apply -target=module.monitoring
-
-# 04_data의 module.eso도 마찬가지 이유로 02_k8s-addon 전체 apply보다 먼저 필요함 —
-# argocd-notifications-eso.tf(02_k8s-addon)가 쓰는 SecretStore/ExternalSecret CRD는
+# 04_data의 module.eso가 02_k8s-addon 전체 apply보다 먼저 필요함 —
+# module.argocd_notifications_secrets(02_k8s-addon)가 쓰는 SecretStore/ExternalSecret CRD는
 # 04_data의 ESO(External Secrets Operator)가 까는데, 확립된 apply 순서
 # (infrastructure→k8s-addon→data)와 반대 방향 의존이라 이렇게 역순으로 한 번
-# 먼저 태워줘야 함. RDS/Redis 등 나머지 04_data 리소스는 아직 안 건드림(아래
-# "data도 다시 apply"에서 마저 적용됨).
+# 먼저 태워줘야 함(helm_release로 바꿔도 cross-root 문제라 이 순서 자체는 여전히 필요 —
+# 안 지켜도 이 리소스 하나만 실패하고 나머지는 정상 적용됨). RDS/Redis 등 나머지 04_data
+# 리소스는 아직 안 건드림(아래 "data도 다시 apply"에서 마저 적용됨).
 terraform -chdir=04_data workspace select release && terraform -chdir=04_data apply -target=module.eso
 
 terraform -chdir=02_k8s-addon apply

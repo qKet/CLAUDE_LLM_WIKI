@@ -76,7 +76,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[queue-max-active-users-bottleneck]] — 대기열 `MAX_ACTIVE_USERS=10`이 2000명 규모 오픈런을 전혀 못 버텨서 아무도 대기열을 통과 못하던 문제, 150으로 상향 — **해결됨**
 - [[loadtest-script-response-envelope-gotchas]] — k6 부하테스트 스크립트가 `GlobalResponseAdvice`의 응답 래핑 규칙(Map은 안 감싸고 DTO/record/List는 `data`로 감쌈)을 몰라서 `queueToken`/`status`가 계속 undefined였던 문제, 좌석 조회 응답의 `roundId`가 항상 null인 것도 같이 발견 — **해결됨**
 - [[grafana-avg-response-time-rate-nan-artifact]] — "평균 응답시간" 패널이 트래픽 뜸한 엔드포인트(`/auth/login`)에서 `rate()` 나눗셈 불안정으로 20013ms 같은 터무니없는 값을 보여주던 문제, 요청률 하한 필터로 해결 — **해결됨**
-- [[crd-not-yet-installed-on-fresh-apply]] — 매일 밤 `02_k8s-addon`을 destroy했다가 아침에 처음부터 재적용할 때마다 3일 연속 재현된 CRD 순서 문제 2건(ServiceMonitor, SecretStore) — `kubernetes_manifest`/`kubectl_manifest`가 plan 시점에 CRD 존재를 요구하는 게 근본 원인, [[runbook/daily-infrastructure-toggle]]에 매일 필요한 targeted apply 2줄을 정식 절차로 반영함(근본 리팩터링은 미착수)
+- [[crd-not-yet-installed-on-fresh-apply]] — 매일 밤 `02_k8s-addon`을 destroy했다가 아침에 처음부터 재적용할 때마다 3일 연속 재현된 CRD 순서 문제 2건(ServiceMonitor, SecretStore) — `kubernetes_manifest`/`kubectl_manifest`가 plan 시점에 CRD 존재를 요구하는 게 근본 원인. **2026-08-20 후속**: 둘 다 `helm_release` 기반으로 전환해서 ServiceMonitor는 완전히 해결(targeted apply 불필요), SecretStore는 cross-root(04_data ESO) 문제라 `module.eso` 선적용은 여전히 필요하나 실패 범위는 대폭 축소됨
 - [[alb-controller-gatewayapi-boot-time-crd-check]] — Gateway API 마이그레이션 1단계 중 발견: AWS Load Balancer Controller는 자기 파드 부팅 시점에 딱 한 번 Gateway API CRD 존재 여부를 확인해서 기능을 켤지 정함 — CRD가 컨트롤러보다 나중에 생기면 `kubectl rollout restart`로 재부팅해야만 정상화됨. `module.gateway_api_crds`를 `module.alb_controller`보다 먼저 apply되도록 depends_on 방향을 설계해서 매일 아침 이 문제가 재발하지 않게 해결 — **해결됨**
 
 ## runbook/ — 반복 운영 절차

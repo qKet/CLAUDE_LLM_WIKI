@@ -671,3 +671,14 @@ Ingress annotation 난립을 계기로 Gateway API 전환을 사용자와 상세
 - 실제 apply해서 파이프라인 전체(CRD→GatewayClass→Gateway→ALB 생성→HTTPRoute→TargetGroupConfiguration→ExternalDNS→Route53 레코드) 검증 완료 — `gw-dev.jun979.click` 테스트 호스트네임으로, 기존 `dev.jun979.click`(Ingress 경로) 실트래픽은 전혀 안 건드림
 - Terraform 모듈 신설: `Infra/modules/addons/gateway-api-crds`, `Infra/modules/addons/gateway-api-pilot`. `Infra/modules/addons/external-dns`에 `sources`(gateway-httproute 추가) 반영
 - 2단계(dev.jun979.click 실제 컷오버)·3단계(admin) 미착수 — 다음 세션에서 이어서 진행
+
+---
+
+## [2026-08-20] Claude Code | troubleshooting | ServiceMonitor/SecretStore도 helm_release로 전환 — CRD 순서 문제 재발 방지 일반화
+
+Gateway API 파일럿에서 검증한 "CRD와 소비 오브젝트를 같은 Helm 차트에 넣고 helm_release로 설치하면 kubernetes_manifest/kubectl_manifest의 plan-time CRD 문제가 원천적으로 없어진다"는 패턴을, 이미 3일 넘게 데었던 기존 두 리소스에도 그대로 적용해서 정리함.
+
+- `kubernetes_manifest.backend_service_monitor` → `modules/addons/backend-servicemonitor`(helm_release)로 전환 — **같은 root(02_k8s-addon) 안** 문제라 완전히 해결됨, 매일 아침 `module.monitoring` targeted apply 불필요해짐
+- `kubectl_manifest.argocd_notifications_secret_store`/`_external_secret` → `modules/addons/argocd-notifications-secrets`(helm_release)로 전환 — ESO가 **다른 root(04_data)** 에 있는 cross-root 문제라 완전 해결은 아님. `module.eso` 선적용 런북 절차는 여전히 필요하지만, 순서가 안 맞아도 "이 helm_release 하나만 apply 시점 실패"로 그치고 나머지 무관한 리소스는 정상 적용됨(예전엔 plan 자체가 실패해서 02_k8s-addon 전체가 막혔음)
+- 둘 다 실제 apply해서 라이브 클러스터에서 정상 동작 확인(ServiceMonitor 재생성, SecretStore `Valid`/ExternalSecret `SecretSynced`, `argocd-notifications-secret` 값 정상 채워짐)
+- [[troubleshooting/crd-not-yet-installed-on-fresh-apply]], [[runbook/daily-infrastructure-toggle]] 갱신 — `module.monitoring` 선적용 스텝 삭제, `module.eso` 선적용은 유지
