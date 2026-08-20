@@ -17,9 +17,9 @@ updated: 2026-08-10
 - `infrastructure`(VPC/EKS/bastion) — 순수 AWS 리소스만, kubernetes/helm provider 안 씀. 맨 먼저 apply.
 - `k8s-addon`(namespace/ArgoCD) — `infrastructure`의 output을 [[terraform-remote-state|원격으로 참조]]해서 EKS API에 인증(kubernetes/helm provider). `infrastructure` 다음, `data`보다 먼저 apply.
 - `registry`(ECR/github-actions-oidc) — 다른 root와 의존관계 없음(EKS/VPC 필요 없음). 순서 상관없이 아무 때나 apply 가능.
-- `data`(RDS/Redis/storage, release/prod) — `infrastructure`의 output(VPC/서브넷 등)과 `k8s-addon`이 만든 네임스페이스(`qket-release`/`qket-prod`)가 이미 있다는 걸 전제로 `kubernetes_config_map`/`module.storage`(ServiceAccount)를 만듦. `infrastructure`/`k8s-addon` 다음에 apply.
+- `data`(RDS/Redis/storage, release/prod) — `infrastructure`의 output(VPC/서브넷 등)과 `k8s-addon`이 만든 네임스페이스(`qket-release`/`qket-prod`)가 이미 있다는 걸 전제로 `kubernetes_config_map`/`module.storage`(ServiceAccount)를 만듦. `infrastructure`/`k8s-addon` 다음에 apply. 2026-08-21부터 `04_data/release`·`04_data/prod` 두 개의 독립된 root([[../decisions/2026-08-21-04data-split-release-prod-directories]]) — 아래에서는 편의상 여전히 "`data`"로 통칭.
 
-`data`가 네임스페이스를 직접 안 만드는 이유: `data`는 workspace라서 release/prod를 나눠서 두 번 apply해야 하는데, 네임스페이스는 `data`의 첫 apply 시점부터 이미 있어야 한다(`kubernetes_config_map`/`module.storage`가 그 존재를 전제). 그래서 workspace 없이 한 번만 apply되는 `k8s-addon`이 대신 둘 다 미리 만들어둔다. (원래는 ArgoCD가 `Infra/kubernetes/*.yaml`로 네임스페이스까지 관리할 계획이었는데, 그 ArgoCD Application이 아직 없어서 새 클러스터마다 `data` apply가 "namespace not found"로 실패하는 걸 겪고 이렇게 옮김 — 자세한 경위는 [[../troubleshooting/eks-destroy-layer-separation]] 참고.)
+`data`가 네임스페이스를 직접 안 만드는 이유: release/prod가 각자 별도로 apply되는데, 네임스페이스는 `data`의 첫 apply 시점부터 이미 있어야 한다(`kubernetes_config_map`/`module.storage`가 그 존재를 전제). 그래서 release/prod와 무관하게 한 번만 apply되는 `k8s-addon`이 대신 둘 다 미리 만들어둔다. (원래는 ArgoCD가 `Infra/kubernetes/*.yaml`로 네임스페이스까지 관리할 계획이었는데, 그 ArgoCD Application이 아직 없어서 새 클러스터마다 `data` apply가 "namespace not found"로 실패하는 걸 겪고 이렇게 옮김 — 자세한 경위는 [[../troubleshooting/eks-destroy-layer-separation]] 참고.)
 
 ## 절차
 
@@ -50,34 +50,29 @@ terraform plan
 terraform apply
 ```
 
-### 4. data workspace 생성 (최초 1회)
+> ⚠️ 2026-08-21: `data`는 더 이상 workspace로 안 나뉜다 — `04_data/release`, `04_data/prod` 두 개의 독립된 root로 분리됨([[../decisions/2026-08-21-04data-split-release-prod-directories]] 참고). 아래 4~5번은 그 이후 기준.
+
+### 4. release 적용
 
 ```bash
-cd Infra/04_data
+cd Infra/04_data/release
 terraform init
-terraform workspace new release
-terraform workspace new prod
-```
-
-### 5. release 적용
-
-```bash
-terraform workspace select release
 terraform plan
 terraform apply
 ```
 
-### 6. prod 적용
+### 5. prod 적용
 
 ```bash
-terraform workspace select prod
+cd Infra/04_data/prod
+terraform init
 terraform plan
 terraform apply
 ```
 
 ## 주의사항
 
-- `data`에서 `terraform workspace select`를 안 하고 그냥 `apply`하면 `default` workspace로 잡히는데, [[terraform-platform-workload-split|workspace_guard]]가 명확한 에러 메시지로 막아준다 — 에러가 나면 당황하지 말고 `terraform workspace select release`(또는 `prod`) 하고 다시 시도.
+- 2026-08-21 이전엔 `data`에서 `terraform workspace select`를 안 하면 `default` workspace로 잡혀서 `workspace_guard`가 막아주는 구조였는데, 지금은 애초에 `04_data/release`/`04_data/prod`가 완전히 분리된 디렉토리라 이 실수 자체가 안 생긴다 — 대신 "어느 디렉토리에서 apply하는지"를 항상 확인할 것.
 - `infrastructure`를 나중에 변경(예: VPC CIDR 수정)하면 `k8s-addon`/`data`가 참조하는 값이 바뀔 수 있으니, `infrastructure` 변경 후엔 둘 다 `plan`으로 영향 확인. `registry`는 `infrastructure`와 무관하니 영향 없음.
 - 클러스터를 destroy 후 재생성하는 경우, `infrastructure`→`k8s-addon` apply가 끝나야 EKS와 네임스페이스가 다시 생기므로 `data`를 먼저/동시에 시도하면 위 이유로 실패한다 — 반드시 순서대로 기다렸다 넘어갈 것. `registry`는 이 사이클과 무관하니 신경 안 써도 됨.
 - **destroy 순서는 반대**: `data`(원칙적으로 안 지움) → `k8s-addon` → `infrastructure`. `registry`는 원칙적으로 안 지움. `infrastructure`의 bastion SG를 `data`의 rds/redis SG가 CIDR로만 참조하도록 바꿔놔서(SG ID 직접 참조 안 함) `data`↔`infrastructure` 사이엔 이제 DependencyViolation이 안 나지만, `k8s-addon`은 EKS Access Entry가 살아있는 동안(=`infrastructure`를 지우기 전) 먼저 지워야 정상적으로 인증돼서 지워짐 — 자세한 내용은 [[../troubleshooting/eks-destroy-layer-separation]].

@@ -9,6 +9,8 @@ updated: 2026-08-11
 # infrastructure / data 2-root 구조와 workspace
 
 > ⚠️ 2026-08-10에 root 디렉토리 이름이 바뀌었다: `platform` → `infrastructure`, `workload` → `data` (기능은 동일, 이름만 변경). 이 파일명(`terraform-platform-workload-split`)은 옛 이름 그대로 두되(다른 문서들의 링크가 이 파일명을 가리키고 있어서), 본문 내용은 새 이름 기준으로 갱신했다. 과거 로그(`log.md`)나 ADR에서 `platform`/`workload`라고 쓴 건 그 시점 실제 이름이므로 안 고친다.
+>
+> ⚠️ **2026-08-21 갱신: `data`는 더 이상 workspace로 안 나뉜다.** release가 RDS/ElastiCache 대신 dev-datastore(StatefulSet)를 쓰게 되면서 release/prod 구조 자체가 달라져, 아래 "`data` 안에서 release/prod를 나누는 법: terraform workspace" 절은 **`04_data/release`·`04_data/prod` 두 개의 독립된 root로 대체됨** — [[../decisions/2026-08-21-04data-split-release-prod-directories]] 참고. 이 문서의 나머지(왜 `infrastructure`/`data`를 root 자체로 나눴는지, SG를 CIDR로 참조하는 이유, `try()` 패턴)는 여전히 유효.
 
 ## 구조
 

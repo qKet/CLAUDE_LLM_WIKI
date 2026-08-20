@@ -732,3 +732,17 @@ Gateway API 마이그레이션(release+prod+admin 컷오버) 완료 직후, `Inf
 - MySQL root 비밀번호를 `02_k8s-addon`(매일 밤 destroy/재생성)의 `random_password`에서 `03_registry`(영구 싱글턴)로 이전 — 기존엔 MySQL 데이터(EBS, 영구보존)와 Terraform이 아는 비밀번호가 둘째 날부터 어긋나는 드리프트 버그가 잠재해있었음(컨테이너가 기존 데이터 디렉터리 있으면 `MYSQL_ROOT_PASSWORD` 재반영 안 함). `ignore_changes`로 보호(`external_api_keys`와 같은 패턴)
 - 부수 정리: `dev-datastore` 모듈이 자체 `random_password` 생성을 그만두면서 `02_k8s-addon`에서 `random` provider 제거, `03_registry`에 새로 추가
 - `terraform validate`는 3개 root(03_registry/02_k8s-addon/04_data) 전부 통과. count=0 모듈을 삼항식으로 참조해도 안전한지 별도 샌드박스(`var.enabled ? module.thing[0].id : "fallback"`)로 실증 확인. 다만 `01_infrastructure`가 지금(야간) destroy돼있어 `04_data`의 실제 `terraform plan`은 이번 세션에서 못 돌려봄 — **다음 아침 인프라 기동 후 plan/apply로 최종 검증 필요**
+
+---
+
+## [2026-08-21] Claude Code | decision | 04_data를 workspace에서 release/prod 두 디렉토리로 분리
+
+[[decisions/2026-08-21-04data-split-release-prod-directories]] 신설. 위 release datastore 전환으로 `04_data`에 count/삼항식 분기가 늘어난 걸 사용자가 보고, "release는 connection config/시크릿이 이제 완전히 다르니 한 파일로 억지로 합치지 말고 나누자"고 판단 — `04_data`(단일 root+workspace)를 `04_data/release`·`04_data/prod` 완전 독립 두 root로 분리(완전 복사 방식, 공용 모듈로 안 뺌 — 사용자 선택).
+
+- **분리 전 안전 확인**: `aws s3 ls`로 실제 state 파일을 직접 조회해서, prod의 `data` state는 이 시점까지 **단 한 번도 apply된 적이 없었음**을 먼저 확인(release만 `env:/release/data/terraform.tfstate`로 실제 존재) — 이 덕분에 release 쪽만 상태 연속성을 신경 쓰면 되는, 생각보다 안전한 작업이 됨
+- `04_data/release`의 backend key를 기존 workspace가 쓰던 것과 **완전히 동일한 문자열**로 맞춰서, `terraform state mv`/`import` 같은 이전 작업 없이 새 디렉토리가 기존 RDS/ElastiCache 등 리소스의 state를 그대로 이어받게 함 — `terraform init` 후 `terraform state list`로 실제로 기존 리소스가 그대로 보이는 것까지 확인. prod는 새 key 사용(이어받을 state가 없었으므로)
+- `04_data/release`는 `module.rds`/`module.redis`/그 보안그룹이 아예 없음(count로 숨기는 게 아니라 개념 자체가 없음), `module.eso`는 prod와 동일한 코드를 그대로 재사용하되 입력값만 dev-datastore 쪽으로
+- **분리 작업 중 이번 변경과 무관한 잠재 버그 발견**: `modules/addons/eso`의 ESO 컨트롤러(`helm_release "external_secrets"`)가 release/prod 구분 없는 고정 name/namespace라, prod를 처음 apply하면 release가 이미 설치한 것과 충돌할 가능성 — prod가 지금까지 한 번도 apply된 적이 없어서 안 드러났을 뿐, 이 분리와 무관하게 원래 있던 설계 문제. **아직 미해결**, prod를 실제로 켤 때 반드시 먼저 조치 필요
+- 작업 도중 이 로컬 체크아웃(`Infra`, 브랜치 `fix/lcy-structural_modification`)에서 `modules/addons/eso/secrets.tf`가 원인 불명으로 변경되어 있던 걸 발견(상세 한국어 주석이 의미 없는 placeholder 헤더로 대체되고, `connection` 시크릿에도 `id: external_api`라고 잘못 붙어있었음) — 사용자가 혼자 작업 중이라고 확인했고, 원본 내용으로 복원함(git checkout이 권한 문제로 막혀서 직접 파일 내용을 다시 씀)
+- `Infra/README.md`, `wiki/runbook/terraform-apply-order.md`, `wiki/runbook/daily-infrastructure-toggle.md`, `wiki/architecture/terraform-platform-workload-split.md`(상단에 슈퍼시드 노트 추가)까지 전부 workspace 명령어를 `04_data/release`·`04_data/prod` 경로 기준으로 갱신
+- 같은 날 별도로: `modules/addons/eso`의 `kubectl_manifest` yaml_body를 `yamlencode({...})`에서 `manifests/*.yaml.tpl` + `templatefile()`로 리팩터링(사용자 요청 — "매니페스트 관리가 어려우니 yaml 파일로 따로 관리"). 리팩터링 전후 렌더링 결과가 완전히 동일한지 별도 스크래치 테스트로 `yamldecode()` 비교까지 실증 확인(4개 매니페스트 전부 `true`)

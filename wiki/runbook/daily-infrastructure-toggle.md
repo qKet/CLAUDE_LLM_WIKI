@@ -47,15 +47,18 @@ terraform -chdir=01_infrastructure apply
 # 먼저 태워줘야 함(helm_release로 바꿔도 cross-root 문제라 이 순서 자체는 여전히 필요 —
 # 안 지켜도 이 리소스 하나만 실패하고 나머지는 정상 적용됨). RDS/Redis 등 나머지 04_data
 # 리소스는 아직 안 건드림(아래 "data도 다시 apply"에서 마저 적용됨).
-terraform -chdir=04_data workspace select release && terraform -chdir=04_data apply -target=module.eso
+terraform -chdir=04_data/release apply -target=module.eso
 
 terraform -chdir=02_k8s-addon apply
 
-# data도 다시 apply — RDS/Redis는 안 건드리고, 네임스페이스가 새로 생기면서
-# 같이 사라졌던 ServiceAccount(qket-backend, IRSA)/ConfigMap만 다시 채워짐 (아래 "왜 04_data도" 참고)
-terraform -chdir=04_data workspace select release && terraform -chdir=04_data apply
-terraform -chdir=04_data workspace select prod && terraform -chdir=04_data apply
+# data도 다시 apply — RDS/Redis(prod)나 dev-datastore 연동(release)은 안 건드리고, 네임스페이스가
+# 새로 생기면서 같이 사라졌던 ServiceAccount(qket-backend, IRSA)/ConfigMap만 다시 채워짐
+# (아래 "왜 04_data도" 참고)
+terraform -chdir=04_data/release apply
+terraform -chdir=04_data/prod apply
 ```
+
+> ⚠️ 2026-08-21: `04_data`가 workspace 없이 `04_data/release`/`04_data/prod` 두 개의 독립된 root로 분리됨([[../decisions/2026-08-21-04data-split-release-prod-directories]]) — 위 명령어는 그 이후 기준. `-chdir=04_data workspace select ...`는 더 이상 존재하지 않음.
 
 **지우는 것**: `module.eks`, `module.ec2`(bastion), `aws_nat_gateway.this`, `aws_eip.nat`, `module.security_group`(bastion SG) — 그리고 `02_k8s-addon` 전체(namespace, ArgoCD).
 
