@@ -706,3 +706,17 @@ release+prod 컷오버 직후 admin도 이어서 진행. "개발 서버는 관�
 - 실제 컷오버 중 Helm uninstall이 `context deadline exceeded`로 실패하는 걸 겪음 — 실제로는 Gateway/ALB 삭제 자체는 완료됐고 TargetGroupConfiguration 2개만 고아로 남음(수동 정리), Terraform state는 `terraform state rm`으로 직접 정리해서 해결
 - 실제 apply + curl로 `dev.jun979.click`/`grafana.jun979.click`/`cd.jun979.click` 전부 검증(타겟그룹 5개 healthy), AWS 보안그룹 직접 조회로 팀원 IP 4개 정상 반영 확인
 - **이 시점부터 프로젝트에 Ingress 오브젝트가 완전히 없음** — Ingress → Gateway API 마이그레이션 전체 완료
+
+---
+
+## [2026-08-20] Claude Code | troubleshooting | 2000명 e2e 부하테스트 — DB 풀 사이징/롤아웃 콜드스타트 문제 발견·일부 해결
+
+Gateway API 마이그레이션(release+prod+admin 컷오버) 완료 직후, `Infra/loadtest/e2e_reservation_2000.js`로 실제 부하테스트 진행. 테스트 전 스크립트 자체를 먼저 점검·보강하고, 진행 중 실시간으로 인프라 이상 징후를 여러 건 발견·조치함.
+
+- **k6 스크립트 사전 점검**: `dev.jun979.click`이 그날 admin Gateway로 옮겨지면서 팀원 IP 허용목록에 걸린다는 점 먼저 확인(실행자 IP가 이미 허용목록에 있어 문제없었음). `insecureSkipTLSVerify: true`, `RAMP_SECONDS` 지터(로그인 요청 전)를 `open_run_10000_no_queue.js`와 동일하게 추가 — 기존엔 이 파일에만 빠져있었음
+- 부하테스트 도중 backend 파드 재시작 발견 → 조사 결과 KEDA 스케일업+Karpenter 새 노드 콜드스타트 CPU 경합(자가치유, 심각하지 않음)으로 확인
+- Grafana 노드 CPU 패널과 AWS 콘솔 노드 목록 수치가 달라 보이는 것에 대한 질문 → CloudWatch 원본 지표로 교차검증, 실제로는 지표 오류가 아니라 부하 자체가 순간적으로 요동치는(bursty) 패턴이라 몇 분 차이로도 수치가 크게 달라짐을 확인
+- [[troubleshooting/hikaricp-pool-stale-sizing-after-rds-upgrade]] 신설 — RDS db.t3.micro→medium 업그레이드 이후 `dbPoolSize×maxReplicas` 재계산을 안 해서 실제 한도(341)의 1/3 수준인 120에서 계속 막혀있었던 걸 실측(HikariCP 타임아웃 68건/10분, RDS DatabaseConnections 120 고정)으로 확인·해결(`CD/helm/values.yaml`: dbPoolSize 10→12, maxReplicas 12→20 = 240)
+- [[troubleshooting/backend-cold-start-cpu-contention-during-rollout]] 신설 — 위 설정 변경이 트리거한 전체 롤링배포 중, 여러 신규 파드가 한 노드에 몰려서 뜨며 readiness probe가 대거 실패 → `HealthyHostCount`가 18:08 한 순간 1로 붕괴 → 마침 그 순간과 겹친 로그인 요청들이 대량 실패(성공률 57%)로 이어진 걸 CloudWatch로 인과관계까지 확인
+- [[troubleshooting/queue-max-active-users-bottleneck]]에 후속 노트 추가 — 로컬에 체크아웃돼있던 다른 브랜치 파일만 보고 "MAX_ACTIVE_USERS가 다시 10으로 돌아갔나?" 착각할 뻔했다가 `origin/release`를 직접 확인해서 150이 맞게 반영돼있음을 재확인(교훈: 로컬 체크아웃 브랜치 ≠ 실제 배포 브랜치). DB 커넥션 여유가 120→240으로 늘어난 만큼 150도 재계산 여지가 있다는 논의는 사용자가 "다음에"로 보류
+- CD 레포(`values.yaml`) 변경은 커밋/푸시 안 함 — 사용자가 직접 처리하기로 함(다른 Qket 코드 레포와 동일한 원칙)

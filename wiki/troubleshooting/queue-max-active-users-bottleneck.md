@@ -3,8 +3,12 @@ title: 대기열 MAX_ACTIVE_USERS=10이 2000명 규모 오픈런을 감당 못�
 category: troubleshooting
 tags: [queue, redis, load-test, capacity]
 created: 2026-08-19
-updated: 2026-08-19
+updated: 2026-08-20
 ---
+
+> ℹ️ 2026-08-20: 이 문서를 다시 찾아보다가 로컬에 체크아웃돼있던 다른 브랜치(`fix/lcy-health_check_port`, 이 hotfix 이전 지점)의 작업트리 파일만 보고 "아직도 10인가?"로 착각할 뻔함 — `git fetch`로 `origin/release`(실제 배포 브랜치, 이미지 태그가 그 커밋 SHA와 일치)를 직접 확인해서 150이 맞게 반영돼있음을 재확인함. **로컬 체크아웃 브랜치와 실제 배포 브랜치가 다를 수 있다는 걸 잊지 말 것** — 값이 궁금하면 항상 `git show origin/release:<path>`로 확인.
+>
+> 같은 날 후속 논의: [[hikaricp-pool-stale-sizing-after-rds-upgrade]]에서 DB 커넥션 풀 총량을 120→240으로 늘렸는데, 150이라는 이 값은 원래 **120 기준**으로 실측 검증된 숫자였다. 커넥션 여유가 늘어난 만큼 150도 다시 올릴 여지가 있다는 논의가 나왔으나, "지금 당장은 미루고 나중에 계산"으로 사용자가 명시적으로 보류함 — 다음에 이어서 할 때는 이 문서의 계산식을 그대로 쓰되, 기준을 120이 아니라 240으로 다시 잡을 것.
 
 # 대기열 MAX_ACTIVE_USERS=10이 2000명 규모 오픈런을 감당 못하던 문제
 
@@ -38,3 +42,4 @@ updated: 2026-08-19
 ## 관련
 - [[loadtest-10000-open-run-cascading-failures]]
 - [[../decisions/2026-08-19-queue-scope-limited-to-booking-flow]] — 대기열이 커버하는 범위(예매 플로우만) 관련 결정
+- [[hikaricp-pool-stale-sizing-after-rds-upgrade]] — 2026-08-20, 이 150이 기준으로 삼았던 DB 커넥션 총량이 120→240으로 늘어남(재계산 필요, 미착수)
