@@ -47,6 +47,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[2026-08-12-sqs-lambda-ses-notification-pipeline]] — 예매확정/취소 알림 파이프라인으로 SQS→Lambda→SES 채택(SNS/EventBridge Scheduler 대신) 근거 — 팀원 공유 아키텍처 노트 기반, 레포 분리/`05_messaging` root 제안은 참고만 하고 안 따름
 - [[2026-08-18-capacity-planning-large-traffic-readiness]] — 대용량 트래픽 대비 용량 분석(실측 기반): cluster-autoscaler/Karpenter 부재가 가장 큰 병목(KEDA가 파드를 늘려도 노드가 안 늘어남), RDS 커넥션 여유·버스터블 크레딧 리스크, Redis 단일노드 재확인 — **같은 날 cluster-autoscaler 설치 + RDS release 상향(db.t3.medium)까지 완료, Redis는 사용자가 보류 결정, 장시간 재측정은 미착수**
 - [[2026-08-19-queue-scope-limited-to-booking-flow]] — 대기열이 "예매하기" 클릭 이후만 보호하고 홈/상세(부하테스트에서 제일 먼저 무너졌던 구간)는 사각지대라는 게 드러났는데, 지금 규모에선 대기열 범위 확장(대안 A) 대신 캐싱+헬스체크 분리(GitHub 이슈 3건)로 완화하기로 확정 — 실제 트래픽이 지금 규모를 크게 넘으면 재검토하기로 트리거를 남겨둠
+- [[2026-08-20-ingress-to-gateway-api-migration]] — Ingress annotation 난립을 계기로 Gateway API로 전환 결정, 1단계(CRD 설치 모듈 + release 환경 테스트 호스트네임 파일럿) 완료·검증. CRD+GatewayClass/Gateway/HTTPRoute를 같은 Helm 차트에 묶어 `helm_release`로 설치하는 방식 채택, ALB Controller의 부팅 시점 CRD 체크 문제로 모듈을 3개로 분리. 실제 컷오버(2단계)/admin 마이그레이션(3단계)은 미착수
 
 ## troubleshooting/ — 실제 겪은 버그
 - [[null-field-partial-update-bug]] — nullable FK 부분 업데이트 버그 (백/프론트 양쪽)
@@ -76,6 +77,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[loadtest-script-response-envelope-gotchas]] — k6 부하테스트 스크립트가 `GlobalResponseAdvice`의 응답 래핑 규칙(Map은 안 감싸고 DTO/record/List는 `data`로 감쌈)을 몰라서 `queueToken`/`status`가 계속 undefined였던 문제, 좌석 조회 응답의 `roundId`가 항상 null인 것도 같이 발견 — **해결됨**
 - [[grafana-avg-response-time-rate-nan-artifact]] — "평균 응답시간" 패널이 트래픽 뜸한 엔드포인트(`/auth/login`)에서 `rate()` 나눗셈 불안정으로 20013ms 같은 터무니없는 값을 보여주던 문제, 요청률 하한 필터로 해결 — **해결됨**
 - [[crd-not-yet-installed-on-fresh-apply]] — 매일 밤 `02_k8s-addon`을 destroy했다가 아침에 처음부터 재적용할 때마다 3일 연속 재현된 CRD 순서 문제 2건(ServiceMonitor, SecretStore) — `kubernetes_manifest`/`kubectl_manifest`가 plan 시점에 CRD 존재를 요구하는 게 근본 원인, [[runbook/daily-infrastructure-toggle]]에 매일 필요한 targeted apply 2줄을 정식 절차로 반영함(근본 리팩터링은 미착수)
+- [[alb-controller-gatewayapi-boot-time-crd-check]] — Gateway API 마이그레이션 1단계 중 발견: AWS Load Balancer Controller는 자기 파드 부팅 시점에 딱 한 번 Gateway API CRD 존재 여부를 확인해서 기능을 켤지 정함 — CRD가 컨트롤러보다 나중에 생기면 `kubectl rollout restart`로 재부팅해야만 정상화됨. `module.gateway_api_crds`를 `module.alb_controller`보다 먼저 apply되도록 depends_on 방향을 설계해서 매일 아침 이 문제가 재발하지 않게 해결 — **해결됨**
 
 ## runbook/ — 반복 운영 절차
 - [[db-schema-change]] — 로컬 DB 스키마 변경 절차 2가지

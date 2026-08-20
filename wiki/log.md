@@ -659,3 +659,15 @@ frontend#27을 30초로 반영한 직후 사용자가 1분(60초)으로 재조�
 - index.md 갱신
 
 같은 세션에서 아침 루틴 전체(01_infrastructure → 02_k8s-addon → 04_data release) 실제로 완료함. 별도로, 다른 세션에서 이미 2000/4000명 규모 e2e 부하테스트 성공(성공률 99.85%, 이중예매 0건)까지 진행돼있는 걸 확인 — 만 명 테스트 때의 완전 다운은 더 이상 재현 안 되고, 남은 병목은 KEDA 스케일업 지연(~3분)뿐인 상태.
+
+---
+
+## [2026-08-20] Claude Code | decision + troubleshooting | Ingress → Gateway API 마이그레이션 1단계 완료
+
+Ingress annotation 난립을 계기로 Gateway API 전환을 사용자와 상세히 논의(CRD 개념, kubernetes_manifest의 plan-time 스키마 검증 문제, CD로 빼는 대안의 destroy-순서 리스크 등) 끝에 단계별 마이그레이션으로 합의, 1단계(CRD 설치 + release 환경 파일럿, 실 트래픽 영향 0)를 실제로 구현·검증까지 완료.
+
+- [[decisions/2026-08-20-ingress-to-gateway-api-migration]] 신설 — 왜 CRD+GatewayClass/Gateway/HTTPRoute를 "같은 Helm 차트, 하나의 helm_release"로 설치하는지, CD(ArgoCD)로 빼는 대안을 왜 기각했는지, `LoadBalancerConfiguration.spec.sourceRanges`가 `inbound-cidrs` 갭이 아니었다는 것 등 정리
+- [[troubleshooting/alb-controller-gatewayapi-boot-time-crd-check]] 신설 — 실제로 부딪힌 새 버그: AWS Load Balancer Controller가 자기 파드 부팅 시점에 딱 한 번 Gateway API CRD 존재를 확인해서 기능을 켤지 정함(순서가 안 맞으면 `kubectl rollout restart` 수동 필요). `module.gateway_api_crds`(CRD+GatewayClass) → `module.alb_controller` → `module.gateway_api_pilot`(실제 오브젝트) 3단 depends_on으로 근본 해결 — 매일 아침 재적용돼도 재발 안 함
+- 실제 apply해서 파이프라인 전체(CRD→GatewayClass→Gateway→ALB 생성→HTTPRoute→TargetGroupConfiguration→ExternalDNS→Route53 레코드) 검증 완료 — `gw-dev.jun979.click` 테스트 호스트네임으로, 기존 `dev.jun979.click`(Ingress 경로) 실트래픽은 전혀 안 건드림
+- Terraform 모듈 신설: `Infra/modules/addons/gateway-api-crds`, `Infra/modules/addons/gateway-api-pilot`. `Infra/modules/addons/external-dns`에 `sources`(gateway-httproute 추가) 반영
+- 2단계(dev.jun979.click 실제 컷오버)·3단계(admin) 미착수 — 다음 세션에서 이어서 진행
