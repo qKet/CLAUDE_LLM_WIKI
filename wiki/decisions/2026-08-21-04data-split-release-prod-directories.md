@@ -95,6 +95,26 @@ SendMessage 권한 부여) 블록을 처음엔 새 모듈(`modules/backend_sqs_p
 이미 유일해서 별도 접미사 변수도 필요 없어짐. release는 실제 살아있는 리소스라 `terraform state mv`로
 새 주소(`module.open_alert_queue.aws_iam_role_policy.sender[0]` 등)로 옮겨서 재생성 없이 이어지게 함.
 
+### 2026-08-21 추가 — ACM 인증서(grafana/argocd/dev/app)를 03_registry로 통합, 위치 실수 정정
+
+기존엔 grafana/argocd/dev/app 인증서가 세 군데 흩어져 있었음: grafana/argocd는 admin-ingress.tf가
+`aws_acm_certificate`로 직접 발급, dev/app은 콘솔에서 수동 발급한 ARN을 하드코딩. 이걸 `modules/acm`
+(도메인+zone_id 받아서 발급+DNS 검증)로 통합하는 김에, **처음엔 `modules/addons/gateway-api-admin`
+(02_k8s-addon 소속 모듈) 안에서 grafana/argocd 인증서를 직접 만들게 했다가 — 사용자가 "그거 02
+말고 03이나 루트에서 호출하는 게 낫지 않냐"고 지적해서 03_registry로 옮김.**
+
+이유: `02_k8s-addon`은 이 프로젝트에서 **매일 밤 destroy/재생성**되는 root다. 인증서 생성 리소스가
+거기(또는 거기서 호출되는 모듈 안 어디든)에 있으면, 매일 아침 인증서가 통째로 새로 발급되고 DNS
+검증을 처음부터 다시 거쳐야 함(수 분 소요, 그동안 grafana/argocd/dev/app **전부 HTTPS 접속 불가**) —
+EBS 볼륨/dev-mysql 비밀번호를 `03_registry`에 두는 것과 정확히 같은 이유로, 인증서도 원래부터
+`03_registry`에 있어야 했음. 처음에 `gateway-api-admin`이 이미 아는 hostname 기준으로 직접 발급하게
+한 건 응집도만 보고 이 destroy 주기 문제를 놓친 실수 — 사용자 지적으로 apply해보기 전에 바로잡음.
+
+최종 구조: `03_registry/acm.tf`에 `module.grafana_cert`/`argocd_cert`/`dev_cert`/`app_cert` 4개,
+출력 4개 추가. `02_k8s-addon`은 전부 `data.terraform_remote_state.registry.outputs.*_certificate_arn`로
+읽어서 `gateway_api_admin`/`ingress_config`에 그대로 넘김(plain 변수로, 모듈 내부에서 재발급 안 함).
+기존 콘솔 수동발급 dev/app 인증서(ARN)는 그대로 방치됨(Terraform이 안 건드림, 정리하려면 콘솔에서 직접).
+
 ## 관련
 - [[2026-08-21-release-datastore-rds-to-statefulset]]
 - [[../architecture/terraform-platform-workload-split]]
