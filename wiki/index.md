@@ -26,7 +26,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[terraform-remote-state]] — S3 backend, infrastructure/data(구 platform/workload) 간 `terraform_remote_state` 참조 구조
 - [[terraform-module-boundaries]] — vpc/subnet/security_group/ec2/eks/rds/redis/storage/ecr 모듈 경계
 - [[terraform-platform-workload-split]] — infrastructure(공유)/data(workspace) 2-root 구조(구 platform/workload), env_config 패턴, nightly-off 상태를 방어하는 `try()` 패턴
-- [[admin-ingress-shared-alb]] — Grafana+ArgoCD IP 허용목록 공유 ALB, IngressGroup이 `inbound-cidrs`/`healthcheck-path`를 적용하는 단위
+- [[admin-ingress-shared-alb]] — Grafana+ArgoCD IP 허용목록 공유 ALB, IngressGroup이 `inbound-cidrs`/`healthcheck-path`를 적용하는 단위 — **2026-08-20: Ingress 구조는 폐기, Gateway API로 대체됐지만 IP 허용목록 공유라는 핵심 트레이드오프는 그대로 유효**([[decisions/2026-08-20-ingress-to-gateway-api-migration]] 참고)
 - [[messaging-infrastructure]] — 이메일 발송(SQS+Lambda+SES) 구조, root 배치, Lambda 배포 방식
 - [[keda-autoscaling]] — backend/frontend KEDA 오토스케일링 구조(엔진은 Infra/Terraform, ScaledObject는 CD/Helm), metrics-server 전제조건, ArgoCD `ignoreDifferences`로 replicas 충돌 방지, 파드 오토스케일링과 노드 오토스케일링은 별개라는 점
 - [[cluster-autoscaler]] — 노드 레벨 오토스케일링(EKS 관리형 노드그룹 desired_size 자동 조절), Karpenter 대신 선택한 이유, ASG autodiscovery 태그가 이미 자동으로 붙어있다는 점, IRSA 전파 지연으로 최초 1회 크래시하는 게 정상이라는 점
@@ -47,7 +47,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[2026-08-12-sqs-lambda-ses-notification-pipeline]] — 예매확정/취소 알림 파이프라인으로 SQS→Lambda→SES 채택(SNS/EventBridge Scheduler 대신) 근거 — 팀원 공유 아키텍처 노트 기반, 레포 분리/`05_messaging` root 제안은 참고만 하고 안 따름
 - [[2026-08-18-capacity-planning-large-traffic-readiness]] — 대용량 트래픽 대비 용량 분석(실측 기반): cluster-autoscaler/Karpenter 부재가 가장 큰 병목(KEDA가 파드를 늘려도 노드가 안 늘어남), RDS 커넥션 여유·버스터블 크레딧 리스크, Redis 단일노드 재확인 — **같은 날 cluster-autoscaler 설치 + RDS release 상향(db.t3.medium)까지 완료, Redis는 사용자가 보류 결정, 장시간 재측정은 미착수**
 - [[2026-08-19-queue-scope-limited-to-booking-flow]] — 대기열이 "예매하기" 클릭 이후만 보호하고 홈/상세(부하테스트에서 제일 먼저 무너졌던 구간)는 사각지대라는 게 드러났는데, 지금 규모에선 대기열 범위 확장(대안 A) 대신 캐싱+헬스체크 분리(GitHub 이슈 3건)로 완화하기로 확정 — 실제 트래픽이 지금 규모를 크게 넘으면 재검토하기로 트리거를 남겨둠
-- [[2026-08-20-ingress-to-gateway-api-migration]] — Ingress annotation 난립을 계기로 Gateway API로 전환, CRD+GatewayClass/Gateway/HTTPRoute를 같은 Helm 차트에 묶어 `helm_release`로 설치. 1단계(파일럿) 검증 후 **같은 날 release+prod를 한 번에 완전 컷오버**(prod가 아직 실서비스 오픈 전이라 단계 분리 없이 진행) — `app_ingress_backend`/`app_ingress_frontend`/`faro_ingress` 3개 Ingress 리소스 완전 삭제, `gateway-api-crds`/`gateway-api-app`(env별 for_each)/`gateway-api-faro`(공유 리소스) 4모듈 구조로 완성. admin(Grafana/ArgoCD) 마이그레이션만 미착수
+- [[2026-08-20-ingress-to-gateway-api-migration]] — Ingress annotation 난립을 계기로 Gateway API로 전환, CRD+GatewayClass/Gateway/HTTPRoute를 같은 Helm 차트에 묶어 `helm_release`로 설치. 같은 날 release+prod 완전 컷오버 → admin(Grafana/ArgoCD)까지 이어서 마이그레이션 완료, "개발 서버는 관리자만" 결정에 따라 dev.jun979.click도 공개 ALB에서 admin Gateway(IP 허용목록 공유)로 재이동. `gateway-api-crds`/`gateway-api-app`(prod 전용)/`gateway-api-faro`(공유)/`gateway-api-admin`(grafana+argocd+dev 공유) 4모듈 구조로 완성 — **이 프로젝트에 Ingress 오브젝트가 하나도 안 남음**
 
 ## troubleshooting/ — 실제 겪은 버그
 - [[null-field-partial-update-bug]] — nullable FK 부분 업데이트 버그 (백/프론트 양쪽)

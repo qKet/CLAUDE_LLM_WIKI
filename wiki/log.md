@@ -694,3 +694,15 @@ Gateway API 파일럿에서 검증한 "CRD와 소비 오브젝트를 같은 Helm
 - 실제 apply로 dev.jun979.click(HTTP 200 frontend/backend, HTTP→HTTPS 301 리다이렉트 확인)·app.jun979.click(ALB/DNS까지 정상, backend/frontend는 prod 미배포로 아직 BackendNotFound — 예상된 상태) 검증
 - 작업 중 `git reset --hard origin/dev`로 커밋 전 2단계 코드가 한 번 날아갔다가 재작성한 해프닝 있었음(1단계는 이미 커밋되어 있어 안전했고, 라이브 클러스터는 2단계 미적용 상태라 실제 인프라 영향 없었음)
 - 3단계(admin — Grafana/ArgoCD)만 미착수로 남음
+
+---
+
+## [2026-08-20] Claude Code | decision | admin(Grafana/ArgoCD) Gateway API 마이그레이션 완료 — dev도 admin 전용으로 재이동, Ingress 완전 소멸
+
+release+prod 컷오버 직후 admin도 이어서 진행. "개발 서버는 관리자만 들어가야 한다"는 판단에 따라 dev.jun979.click(release)를 공개 ALB에서 admin Gateway로 재이동시켜서 grafana/argocd/dev 셋이 팀원 IP 허용목록(`sourceRanges`)을 공유하게 함 — prod는 실서비스용이라 공개 유지.
+
+- `modules/addons/gateway-api-admin` 신설 — Gateway 하나(리스너 3개, 각자 hostname의 HTTPS:443) + http:80 리다이렉트 전용, 인증서 3개를 SNI로 한 리스너에 다중 연결(`defaultCertificate`+`certificates`). `allowedRoutes.namespaces.from: All`로 monitoring/argocd/qket-release에 흩어진 HTTPRoute들의 cross-namespace 첨부 허용
+- `admin-ingress.tf`의 `kubernetes_ingress_v1.grafana`/`argocd` 완전 삭제(ACM 인증서 리소스는 재사용), `02_k8s-addon/main.tf`의 `gateway_api_app` for_each에서 release 제거(prod만 남음)
+- 실제 컷오버 중 Helm uninstall이 `context deadline exceeded`로 실패하는 걸 겪음 — 실제로는 Gateway/ALB 삭제 자체는 완료됐고 TargetGroupConfiguration 2개만 고아로 남음(수동 정리), Terraform state는 `terraform state rm`으로 직접 정리해서 해결
+- 실제 apply + curl로 `dev.jun979.click`/`grafana.jun979.click`/`cd.jun979.click` 전부 검증(타겟그룹 5개 healthy), AWS 보안그룹 직접 조회로 팀원 IP 4개 정상 반영 확인
+- **이 시점부터 프로젝트에 Ingress 오브젝트가 완전히 없음** — Ingress → Gateway API 마이그레이션 전체 완료

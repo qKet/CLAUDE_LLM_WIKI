@@ -3,8 +3,10 @@ title: Grafana + ArgoCD — IP 허용목록 공유 ALB
 category: architecture
 tags: [alb, ingress, grafana, argocd, monitoring, security]
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-20
 ---
+
+> ⚠️ 2026-08-20: 이 문서는 **Ingress 기반 구조(과거)** 를 설명한 것 — Gateway API로 완전히 이관되면서 `kubernetes_ingress_v1.grafana`/`argocd`는 삭제됐다. 지금은 `dev.jun979.click`(release)도 같이 합류해서 셋이 하나의 admin Gateway/ALB(`team5-qket-gw-admin-alb`)와 IP 허용목록을 공유한다 — 자세한 내용은 [[../decisions/2026-08-20-ingress-to-gateway-api-migration]] 참고. 아래 내용 중 "IngressGroup"/`group.name`/`inbound-cidrs` 같은 Ingress 전용 개념은 Gateway API에서 각각 "하나의 Gateway에 여러 리스너"/`LoadBalancerConfiguration.spec.sourceRanges`로 대체됐지만, **"IP 허용목록이 그룹 전체에 공유 적용된다"는 핵심 트레이드오프 자체는 새 구조에서도 그대로 유효**하다.
 
 # Grafana + ArgoCD — IP 허용목록 공유 ALB
 

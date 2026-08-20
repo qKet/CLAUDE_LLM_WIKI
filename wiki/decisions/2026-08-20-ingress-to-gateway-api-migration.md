@@ -1,14 +1,16 @@
 ---
-title: Ingress → Gateway API 마이그레이션 — release+prod 완전 컷오버 완료, admin은 별도 단계
+title: Ingress → Gateway API 마이그레이션 — 전체 완료(release/prod/admin), dev도 admin 전용으로 전환
 category: decisions
-status: release+prod 컷오버 완료(Ingress 완전 대체) — admin(Grafana/ArgoCD)만 미착수
+status: 완료 — Ingress 오브젝트 전부 삭제(qket-release/qket-prod/argocd/monitoring 전체)
 date: 2026-08-20
 author: Claude Code
 tags: [gateway-api, ingress, alb, aws-load-balancer-controller, terraform, helm, external-dns]
 updated: 2026-08-20
 ---
 
-> ✅ 2026-08-20 같은 날 후속: 아래 "1단계"로 시작해서 release 테스트 호스트네임 파일럿까지 검증한 뒤, **원래 계획(release 먼저, 검증 후 prod)과 달리 release+prod를 한 번에 완전히 컷오버**했다 — 사용자 판단: "Prod는 아직 올리지도 않아서(실서비스 오픈 전) 실 트래픽 리스크가 없으니 한 번에 가고 문제는 올리면서 해결하면 된다". `app_ingress_backend`/`app_ingress_frontend`/`faro_ingress` 3개 Ingress 리소스는 코드에서 완전히 삭제됨. 아래 "1단계 실제 구현"은 파일럿 시점 기록이고, 최종 구현/검증 결과는 맨 아래 "release+prod 완전 컷오버 (같은 날 후속)" 섹션 참고.
+> ✅ 2026-08-20 같은 날 후속: 아래 "1단계"로 시작해서 release 테스트 호스트네임 파일럿까지 검증한 뒤, **원래 계획(release 먼저, 검증 후 prod)과 달리 release+prod를 한 번에 완전히 컷오버**했다 — 사용자 판단: "Prod는 아직 올리지도 않아서(실서비스 오픈 전) 실 트래픽 리스크가 없으니 한 번에 가고 문제는 올리면서 해결하면 된다". `app_ingress_backend`/`app_ingress_frontend`/`faro_ingress` 3개 Ingress 리소스는 코드에서 완전히 삭제됨.
+>
+> ✅✅ 같은 날 한 번 더 후속: admin(Grafana/ArgoCD)도 이어서 마이그레이션 완료. 그리고 "개발 서버는 관리자만 들어가야 한다"는 결정에 따라 **dev.jun979.click(release)를 공개 ALB에서 admin Gateway로 재이동**시켜서 grafana/argocd/dev 셋이 팀원 IP 허용목록을 공유하게 함(prod는 공개 유지). `kubernetes_ingress_v1.grafana`/`argocd`도 완전히 삭제 — 이제 이 프로젝트에 Ingress 오브젝트가 하나도 없음. 최종 구현/검증 결과는 맨 아래 "admin(Grafana/ArgoCD) + dev 재이동 (같은 날 후속)" 섹션 참고.
 
 # Ingress → Gateway API 마이그레이션
 
@@ -114,9 +116,36 @@ Helm 릴리즈 이름도 env를 넣어 유일하게 만듦(`gateway-api-app-rele
 - prod의 backend/frontend가 실제 배포된 뒤 `HTTPRoute ResolvedRefs`가 자동으로 `True`로 바뀌는지 재확인 필요
 - 3단계(admin — Grafana/ArgoCD) 전부 미착수
 
+## admin(Grafana/ArgoCD) + dev 재이동 (같은 날 후속)
+
+release+prod 컷오버 직후, 사용자 지시로 admin도 이어서 진행. 추가로 "개발 서버는 관리자만 들어가야 한다"는 판단에 따라 dev(release)를 아예 공개 ALB에서 admin Gateway로 옮겨서 세 도메인(grafana/argocd/dev)이 IP 허용목록을 공유하게 함(prod는 실서비스용이라 공개 유지).
+
+### 5번째 모듈: `gateway-api-admin`
+
+```
+module.gateway_api_crds → module.alb_controller → module.gateway_api_faro → module.gateway_api_admin
+                                                                            → module.gateway_api_app (for_each: prod만)
+```
+
+- Gateway 하나(`qket-gw-admin`, `monitoring` 네임스페이스)에 **리스너 3개**(grafana-https/argocd-https/dev-https, 전부 포트 443) + http:80 리다이렉트 전용 리스너 — 오늘 Ingress의 `group.name` 공유와 동일한 효과를 리스너 여러 개로 표현
+- `LoadBalancerConfiguration.spec.sourceRanges`로 팀원 IP 허용목록 적용(오늘 `inbound-cidrs`와 동일 — [[../architecture/admin-ingress-shared-alb]] 참고, 이 결정 자체는 그 문서의 트레이드오프를 그대로 계승)
+- 인증서 3개(grafana/argocd/dev)를 **SNI로 한 443 리스너에 다중 연결** — `LoadBalancerConfiguration.spec.listenerConfigurations[].defaultCertificate`(1개) + `.certificates`(나머지 목록)로 가능. ALB가 SNI로 Host 헤더 보고 알아서 맞는 인증서 골라줌
+- `HTTPRoute`는 각자 자기 백엔드와 같은 네임스페이스에 둠(grafana→monitoring, argocd→argocd, dev→qket-release) — Gateway 자신은 monitoring에 있어서 `allowedRoutes.namespaces.from: All`로 cross-namespace HTTPRoute 첨부를 허용해야 했음(이건 backendRef cross-namespace용 ReferenceGrant와는 별개 메커니즘 — Route가 다른 네임스페이스의 Gateway에 붙는 것 자체는 Gateway의 `allowedRoutes`가, Route의 backendRef가 다른 네임스페이스를 가리키는 것은 ReferenceGrant가 각각 담당)
+- dev의 `/collect`(Faro) cross-namespace backendRef는 기존 `module.gateway_api_faro`의 ReferenceGrant를 그대로 재사용(release 네임스페이스를 이미 허용해뒀음 — 새로 안 만들어도 됨)
+
+### 실제 컷오버 중 겪은 것 — Helm uninstall 타임아웃 + Terraform state 불일치
+
+release를 공개 `gateway-api-app`에서 admin으로 옮기면서, 예전 release 전용 helm_release(`gateway-api-app-release`)를 삭제해야 했는데 `Error: uninstallation completed with 1 error(s): context deadline exceeded`가 남 — ALB/타겟그룹이 실제로 정리되는 데 Helm의 기본 대기시간보다 오래 걸린 것으로 보임. 실제로는 그 뒤 클러스터를 직접 확인해보니 Gateway/ALB 자체는 정상적으로 삭제 완료돼있었고, `TargetGroupConfiguration` 오브젝트 2개만 고아로 남아있었음(`kubectl delete`로 수동 정리) — Terraform state에는 이 helm_release가 여전히 "존재"로 남아있어서 `terraform state rm`으로 직접 정리해야 했음(재시도하면 이미 지워진 걸 또 지우려다 비슷하게 걸릴 걸로 예상돼서 재시도 대신 이 방법 택함).
+
+### 검증 결과
+
+`https://dev.jun979.click/`(200)/`/api/health`(200)/HTTP→HTTPS 리다이렉트(301), `https://grafana.jun979.click/`(302, 로그인 리다이렉트라 정상), `https://cd.jun979.click/`(200) 전부 팀원 허용 IP에서 확인. 타겟그룹 5개(argocd/grafana/backend/frontend/faro) 전부 healthy. AWS 보안그룹을 직접 조회해서 4개 팀원 IP가 80/443 양쪽에 정확히 반영된 것도 확인함.
+
+**이 시점에서 `kubectl get ingress -A`가 빈 목록** — 이 프로젝트에 Ingress 오브젝트가 하나도 안 남음.
+
 ## 관련
 - [[../troubleshooting/alb-controller-gatewayapi-boot-time-crd-check]]
+- [[../architecture/admin-ingress-shared-alb]]
 - [[../troubleshooting/crd-not-yet-installed-on-fresh-apply]]
 - [[../troubleshooting/eks-destroy-layer-separation]]
-- [[../architecture/admin-ingress-shared-alb]]
 - [[../runbook/daily-infrastructure-toggle]]
