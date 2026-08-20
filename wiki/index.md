@@ -75,6 +75,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[queue-max-active-users-bottleneck]] — 대기열 `MAX_ACTIVE_USERS=10`이 2000명 규모 오픈런을 전혀 못 버텨서 아무도 대기열을 통과 못하던 문제, 150으로 상향 — **해결됨**
 - [[loadtest-script-response-envelope-gotchas]] — k6 부하테스트 스크립트가 `GlobalResponseAdvice`의 응답 래핑 규칙(Map은 안 감싸고 DTO/record/List는 `data`로 감쌈)을 몰라서 `queueToken`/`status`가 계속 undefined였던 문제, 좌석 조회 응답의 `roundId`가 항상 null인 것도 같이 발견 — **해결됨**
 - [[grafana-avg-response-time-rate-nan-artifact]] — "평균 응답시간" 패널이 트래픽 뜸한 엔드포인트(`/auth/login`)에서 `rate()` 나눗셈 불안정으로 20013ms 같은 터무니없는 값을 보여주던 문제, 요청률 하한 필터로 해결 — **해결됨**
+- [[crd-not-yet-installed-on-fresh-apply]] — 매일 밤 `02_k8s-addon`을 destroy했다가 아침에 처음부터 재적용할 때마다 3일 연속 재현된 CRD 순서 문제 2건(ServiceMonitor, SecretStore) — `kubernetes_manifest`/`kubectl_manifest`가 plan 시점에 CRD 존재를 요구하는 게 근본 원인, [[runbook/daily-infrastructure-toggle]]에 매일 필요한 targeted apply 2줄을 정식 절차로 반영함(근본 리팩터링은 미착수)
 
 ## runbook/ — 반복 운영 절차
 - [[db-schema-change]] — 로컬 DB 스키마 변경 절차 2가지
@@ -111,4 +112,4 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - 🔴 (신규, 2026-08-18) ArgoCD `repo-server`가 CPU/메모리 request 없음(BestEffort) — 부하테스트 중 노드가 바빠지자 자기 헬스체크에도 응답 못 해 재시작당함, ArgoCD UI가 일시적으로 "connection refused" 뱉음. [[troubleshooting/loadtest-10000-open-run-cascading-failures]] 참고 — **미해결**
 - ✅ (대부분 해결, 2026-08-18) [[decisions/2026-08-18-capacity-planning-large-traffic-readiness]] — cluster-autoscaler 설치, RDS release를 `db.t3.medium`으로 상향, 500~10000명 규모 재측정까지 진행 완료. 여전히 미착수/미해결: prod RDS 상향(release 결과 보고 결정 예정), Redis 용량/HA(사용자가 명시적으로 보류), RDS 버스터블 크레딧 장시간 소진 시나리오, 위 ALB 헬스체크 연쇄 장애
 - `Infra` PR #15(`feature/nyj`, 모니터링/AMP 작업)가 merge conflict 해결 완료로 `MERGEABLE` 상태까지 갔지만 아직 `dev`로 실제 merge는 안 됨 — 나윤준님 직접 확인 후 merge할지, 바로 merge할지 미결정
-- 🔴 (신규, 2026-08-19, 미문서화) `02_k8s-addon/argocd-notifications-eso.tf`(ArgoCD 알림 이메일 기능, 커밋 `4e7a965`)가 `04_data`의 ESO가 설치하는 `external-secrets.io/v1` CRD를 참조하는데, 확립된 apply 순서(`infrastructure→k8s-addon→data`)와 반대 방향 의존이라 매일 아침 처음 apply할 때마다 CRD 못 찾는 에러 재현 예상(어제 ServiceMonitor CRD와 같은 계열, 이번엔 root 경계를 넘음). 우회법(`04_data`의 `module.eso`를 먼저 targeted apply)은 찾았지만 아직 정식 troubleshooting 문서로 안 남겨짐 — 다음에 또 겪으면 그때 문서화할 것
+- ✅ (문서화 완료, 2026-08-20) [[troubleshooting/crd-not-yet-installed-on-fresh-apply]] — `02_k8s-addon/argocd-notifications-eso.tf`가 `04_data`의 ESO CRD를 역방향으로 의존하는 문제 + `module.monitoring`의 ServiceMonitor CRD 문제까지 묶어서 정리, [[runbook/daily-infrastructure-toggle]]의 "아침 켜기" 절차에 두 targeted apply를 정식으로 반영함(3일 연속 재현되어 절차화). 근본 리팩터링(1번: eso 관련 리소스를 04_data로 이전)은 아직 미착수

@@ -35,8 +35,26 @@ terraform -chdir=01_infrastructure destroy \
 
 ### 아침 — 켜기
 
+> ⚠️ 2026-08-18~20 **매일 아침 3일 연속** 아래 두 CRD 에러를 겪음 — `02_k8s-addon`을 밤새 destroy했다가 처음부터 다시 apply하는 거라, CRD를 쓰는 리소스가 plan/apply 시점에 그 CRD가 아직 없어서 실패하는 게 매번 재현됨. 순서를 아래처럼 안 지키면 무조건 남 — 자세한 원인은 [[../troubleshooting/crd-not-yet-installed-on-fresh-apply]] 참고.
+
 ```bash
 terraform -chdir=01_infrastructure apply
+
+# 02_k8s-addon 전체 apply 전에, 그 안의 module.monitoring만 먼저 apply해서
+# ServiceMonitor CRD(monitoring.coreos.com)를 깔아둬야 함 — 안 그러면
+# kubernetes_manifest.backend_service_monitor가 "no matches for kind
+# ServiceMonitor"로 실패함 (CRD도 이 root가 같이 까는데, 같은 apply 안에서
+# plan이 그 CRD를 먼저 요구해버림).
+terraform -chdir=02_k8s-addon apply -target=module.monitoring
+
+# 04_data의 module.eso도 마찬가지 이유로 02_k8s-addon 전체 apply보다 먼저 필요함 —
+# argocd-notifications-eso.tf(02_k8s-addon)가 쓰는 SecretStore/ExternalSecret CRD는
+# 04_data의 ESO(External Secrets Operator)가 까는데, 확립된 apply 순서
+# (infrastructure→k8s-addon→data)와 반대 방향 의존이라 이렇게 역순으로 한 번
+# 먼저 태워줘야 함. RDS/Redis 등 나머지 04_data 리소스는 아직 안 건드림(아래
+# "data도 다시 apply"에서 마저 적용됨).
+terraform -chdir=04_data workspace select release && terraform -chdir=04_data apply -target=module.eso
+
 terraform -chdir=02_k8s-addon apply
 
 # data도 다시 apply — RDS/Redis는 안 건드리고, 네임스페이스가 새로 생기면서
@@ -73,3 +91,4 @@ terraform -chdir=04_data workspace select prod && terraform -chdir=04_data apply
 - [[../architecture/terraform-platform-workload-split]]
 - [[../troubleshooting/eks-destroy-layer-separation]]
 - [[../troubleshooting/eks-provider-auth]]
+- [[../troubleshooting/crd-not-yet-installed-on-fresh-apply]]

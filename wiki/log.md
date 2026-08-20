@@ -646,3 +646,16 @@ frontend#27을 30초로 반영한 직후 사용자가 1분(60초)으로 재조�
 - index.md, log.md 갱신
 
 **남은 것**: round_id=18의 2000석은 테스트로 전부 RESERVED된 상태로 남아있음(loadtest 계정 소유) — 다음에 이어서 테스트할 사람은 원복 필요(`UPDATE RESERVATIONS SET user_id=NULL, reserved_status='AVAILABLE', reserved_at=NULL WHERE round_id=18 AND user_id LIKE 'loadtest%'`). 결제 플로우 자체의 부하테스트는 여전히 미수행(토스페이먼츠 실제 API 의존 때문에 구조적으로 어려움 — 필요하면 토스 테스트 모드 연동 검토 필요).
+
+---
+
+## [2026-08-20] Claude Code | troubleshooting | 매일 아침 재적용 CRD 순서 문제 3일 연속 재현 — 절차로 정식 반영
+
+어제 index.md에 "미문서화, 다음에 또 겪으면 문서화" 메모를 남겨뒀던 그 문제(`argocd-notifications-eso.tf`의 ESO CRD 역방향 의존)가 오늘 아침 `daily-infrastructure-toggle` 루틴대로 재적용하다 또 재현됨(어제 처음 겪은 ServiceMonitor CRD 문제와 함께, 3일 연속). 이번엔 임시 우회로 넘어가지 않고 제대로 문서화·절차화함.
+
+- [[troubleshooting/crd-not-yet-installed-on-fresh-apply]] 신설 — `kubernetes_manifest`/`kubectl_manifest`가 plan 단계에서 CRD 존재를 요구하는 게 공통 근본 원인임을 정리. 같은 root 내부 순서 문제(ServiceMonitor ← module.monitoring)와 root 경계를 넘는 순서 문제(SecretStore ← 04_data의 module.eso)를 구분해서 설명, 둘 다 "매일 밤 02_k8s-addon을 통째로 destroy하는 비용 절감 루틴" 때문에 최초 1회가 아니라 매일 재현된다는 점 명시
+- [[runbook/daily-infrastructure-toggle]] "아침 — 켜기" 절차에 두 targeted apply(`module.monitoring`, `04_data`의 `module.eso`)를 정식 스텝으로 반영 — 다음 사람은 이 문서만 따라가면 안 헤맴
+- 근본 리팩터링(ESO 관련 리소스를 `04_data`로 이전)은 아직 미착수로 남김 — 지금은 매일 몇 줄 더 치는 것으로 감수하기로
+- index.md 갱신
+
+같은 세션에서 아침 루틴 전체(01_infrastructure → 02_k8s-addon → 04_data release) 실제로 완료함. 별도로, 다른 세션에서 이미 2000/4000명 규모 e2e 부하테스트 성공(성공률 99.85%, 이중예매 0건)까지 진행돼있는 걸 확인 — 만 명 테스트 때의 완전 다운은 더 이상 재현 안 되고, 남은 병목은 KEDA 스케일업 지연(~3분)뿐인 상태.
