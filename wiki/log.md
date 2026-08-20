@@ -682,3 +682,15 @@ Gateway API 파일럿에서 검증한 "CRD와 소비 오브젝트를 같은 Helm
 - `kubectl_manifest.argocd_notifications_secret_store`/`_external_secret` → `modules/addons/argocd-notifications-secrets`(helm_release)로 전환 — ESO가 **다른 root(04_data)** 에 있는 cross-root 문제라 완전 해결은 아님. `module.eso` 선적용 런북 절차는 여전히 필요하지만, 순서가 안 맞아도 "이 helm_release 하나만 apply 시점 실패"로 그치고 나머지 무관한 리소스는 정상 적용됨(예전엔 plan 자체가 실패해서 02_k8s-addon 전체가 막혔음)
 - 둘 다 실제 apply해서 라이브 클러스터에서 정상 동작 확인(ServiceMonitor 재생성, SecretStore `Valid`/ExternalSecret `SecretSynced`, `argocd-notifications-secret` 값 정상 채워짐)
 - [[troubleshooting/crd-not-yet-installed-on-fresh-apply]], [[runbook/daily-infrastructure-toggle]] 갱신 — `module.monitoring` 선적용 스텝 삭제, `module.eso` 선적용은 유지
+
+---
+
+## [2026-08-20] Claude Code | decision | Ingress → Gateway API release+prod 완전 컷오버 완료
+
+1단계(CRD+release 파일럿) 검증 직후, 사용자 판단으로 범위를 확장해서 release(`dev.jun979.click`)+prod(`app.jun979.click`) 둘 다 한 번에 실제 컷오버 — prod가 아직 실서비스 오픈 전이라 단계 분리 없이 진행하기로 함. 기존 `app_ingress_backend`/`app_ingress_frontend`/`faro_ingress` 3개 Ingress 리소스를 코드에서 완전히 삭제.
+
+- 모듈 구조를 4개로 재구성: `gateway-api-crds`(CRD+GatewayClass, 공용)→`alb_controller`→`gateway-api-faro`(alloy-faro ReferenceGrant/TargetGroupConfiguration, release+prod 공유라 한 번만)→`gateway-api-app`(구 gateway-api-pilot, `for_each`로 release/prod 각각 인스턴스화). 공유 리소스를 env별 모듈에 안 두고 따로 뺀 이유: 같은 이름 오브젝트를 두 helm_release가 동시에 소유하려다 충돌하기 때문
+- [[troubleshooting/gateway-api-instance-target-type-clusterip-service]] 신설 — `TargetGroupConfiguration.targetType` 기본값(instance)이 ClusterIP 서비스(alloy-faro)에서 Gateway 전체를 실패시키는 문제 발견·해결(`targetType: ip` 명시). 이어서 헬스체크 경로 문제(`/`→404, `/collect`→405)도 Grafana Alloy 표준 엔드포인트 `/-/ready`로 해결
+- 실제 apply로 dev.jun979.click(HTTP 200 frontend/backend, HTTP→HTTPS 301 리다이렉트 확인)·app.jun979.click(ALB/DNS까지 정상, backend/frontend는 prod 미배포로 아직 BackendNotFound — 예상된 상태) 검증
+- 작업 중 `git reset --hard origin/dev`로 커밋 전 2단계 코드가 한 번 날아갔다가 재작성한 해프닝 있었음(1단계는 이미 커밋되어 있어 안전했고, 라이브 클러스터는 2단계 미적용 상태라 실제 인프라 영향 없었음)
+- 3단계(admin — Grafana/ArgoCD)만 미착수로 남음

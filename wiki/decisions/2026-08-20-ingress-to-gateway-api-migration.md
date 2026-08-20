@@ -1,12 +1,14 @@
 ---
-title: Ingress → Gateway API 마이그레이션 — 1단계(CRD/파일럿) 완료, 실 컷오버는 별도 단계
+title: Ingress → Gateway API 마이그레이션 — release+prod 완전 컷오버 완료, admin은 별도 단계
 category: decisions
-status: 1단계 구현 완료 (release 파일럿, 실 트래픽 영향 없음) — 2·3단계(실제 컷오버, admin) 미착수
+status: release+prod 컷오버 완료(Ingress 완전 대체) — admin(Grafana/ArgoCD)만 미착수
 date: 2026-08-20
 author: Claude Code
 tags: [gateway-api, ingress, alb, aws-load-balancer-controller, terraform, helm, external-dns]
 updated: 2026-08-20
 ---
+
+> ✅ 2026-08-20 같은 날 후속: 아래 "1단계"로 시작해서 release 테스트 호스트네임 파일럿까지 검증한 뒤, **원래 계획(release 먼저, 검증 후 prod)과 달리 release+prod를 한 번에 완전히 컷오버**했다 — 사용자 판단: "Prod는 아직 올리지도 않아서(실서비스 오픈 전) 실 트래픽 리스크가 없으니 한 번에 가고 문제는 올리면서 해결하면 된다". `app_ingress_backend`/`app_ingress_frontend`/`faro_ingress` 3개 Ingress 리소스는 코드에서 완전히 삭제됨. 아래 "1단계 실제 구현"은 파일럿 시점 기록이고, 최종 구현/검증 결과는 맨 아래 "release+prod 완전 컷오버 (같은 날 후속)" 섹션 참고.
 
 # Ingress → Gateway API 마이그레이션
 
@@ -14,11 +16,11 @@ updated: 2026-08-20
 
 `alb.ingress.kubernetes.io/*` annotation이 10개 넘게 쌓이면서 관리 부담이 커짐 — 특히 `healthcheck-path`가 Ingress 오브젝트 단위로만 적용돼서, backend/frontend Ingress를 어쩔 수 없이 둘로 쪼갠 것([[../architecture/admin-ingress-shared-alb]]에서도 같은 제약으로 Grafana/ArgoCD Ingress를 나눔)이 대표적인 pain point. 업스트림도 Ingress 대신 Gateway API를 권장하는 방향이라 전환하기로 함.
 
-실도메인 4개(`dev.jun979.click`/`app.jun979.click`/`grafana.jun979.click`/`cd.jun979.click`)가 걸린 마이그레이션이라 단계별로 진행하기로 확정:
+실도메인 4개(`dev.jun979.click`/`app.jun979.click`/`grafana.jun979.click`/`cd.jun979.click`)가 걸린 마이그레이션이라 처음엔 단계별로 진행하기로 했었음:
 
-- **1단계(이 문서, 완료)**: CRD 설치 + `release` 환경에 테스트 호스트네임(`gw-dev.jun979.click`)으로 파일럿 — 실 트래픽 영향 0
-- 2단계(추후): 파일럿 검증 후 `dev.jun979.click` 실제 컷오버 → `prod`
-- 3단계(추후): admin(Grafana/ArgoCD) — `inbound-cidrs`에 대응하는 필드(`LoadBalancerConfiguration.spec.sourceRanges`)가 실제로 존재함을 확인했으니(아래 "당초 예상과 달랐던 점" 참고) 갭은 아니지만, 그래도 가장 나중으로 미룸(admin 도구라 보안 영향이 더 큼)
+- **1단계(완료)**: CRD 설치 + `release` 환경에 테스트 호스트네임(`gw-dev.jun979.click`)으로 파일럿 — 실 트래픽 영향 0
+- **2단계(완료, 당초 계획에서 범위 확장됨)**: `dev.jun979.click`(release) + `app.jun979.click`(prod) **동시** 실제 컷오버 — prod가 아직 실서비스 오픈 전이라 release만 먼저 하고 검증할 이유가 없어져서 범위를 합침
+- 3단계(미착수): admin(Grafana/ArgoCD) — `inbound-cidrs`에 대응하는 필드(`LoadBalancerConfiguration.spec.sourceRanges`)가 실제로 존재함을 확인했으니(아래 "당초 예상과 달랐던 점" 참고) 갭은 아니지만, admin 도구라 보안 영향이 더 커서 가장 나중으로 미룸
 
 ## 결정
 
@@ -69,11 +71,48 @@ GatewayClass/Gateway/HTTPRoute를 Terraform(`kubernetes_manifest`) 대신 CD(Arg
 - **`inbound-cidrs`(admin IP 허용목록) 갭이 없었음**: `LoadBalancerConfiguration` CRD 스키마를 직접 읽어보니 `spec.sourceRanges`("optional list of CIDRs that are allowed to access the LB")가 정확히 이 역할을 함. 처음 설계 검토 때는 "갭이라 별도 Security Group이 필요하다"고 판단했었는데, 실제 CRD를 fetch해서 확인해보니 아니었음 — 3단계(admin 마이그레이션) 때 그대로 쓰면 됨.
 - **ALB Controller의 부팅 시점 CRD 체크**(위 "모듈을 왜 3개로 쪼갰나" 참고)는 사전 조사로는 전혀 예상 못 했던 부분 — 실제로 apply해보고 나서야 발견함.
 
-## 트레이드오프 / 남은 리스크
+## release+prod 완전 컷오버 (같은 날 후속)
 
-- 파일럿은 TLS 없이 HTTP:80만 검증함 — 2단계(실제 컷오버) 때는 `gw-dev.jun979.click` 이 아니라 실제 도메인용 인증서를 `LoadBalancerConfiguration.spec.listenerConfigurations[].defaultCertificate`(ACM ARN)로 연결해야 함
-- `ssl-redirect`(HTTP→HTTPS 리다이렉트)의 Gateway API 쪽 정확한 메커니즘은 아직 미확인 — 2단계 착수 전에 `RequestRedirect` HTTPRoute filter 방식으로 스파이크 필요
-- 2단계(실제 `dev.jun979.click` 컷오버)/3단계(admin) 전부 미착수 — 이 문서는 1단계 범위만 다룸
+파일럿 검증 직후, 사용자 판단으로 "release만 먼저"가 아니라 release+prod를 한 번에 진행. 실제로 겪은 것:
+
+### 모듈을 4개로 재구성 (env별 for_each + 공유 리소스 분리)
+
+`gateway-api-pilot` 모듈을 release/prod 양쪽에서 `for_each`로 인스턴스화하는 구조로 바꿈:
+
+```
+module.gateway_api_crds   (CRD + GatewayClass, 여전히 1개, 의존성 없음)
+        ↓
+module.alb_controller
+        ↓
+module.gateway_api_faro   (신설 — alloy-faro ReferenceGrant + TargetGroupConfiguration, 1개만)
+        ↓
+module.gateway_api_app    (구 gateway_api_pilot, for_each = local.ingress_config → release/prod 2개 인스턴스)
+```
+
+`gateway-api-faro`를 별도 모듈로 뺀 이유: Grafana Alloy Faro 수집 엔드포인트(`alloy-faro` Service)는 release/prod가 **같은 Service를 공유**하는데(모니터링은 환경 구분 없이 하나), 이걸 env별 `gateway-api-app` 인스턴스 안에 넣으면 `monitoring` 네임스페이스 안에 같은 이름의 `ReferenceGrant`/`TargetGroupConfiguration`을 release·prod 두 helm_release가 동시에 만들려다 소유권 충돌이 남(`referencegrants.gateway.networking.k8s.io "..." already exists"` 에러로 실제로 겪음). 공유 리소스는 한 번만, env별 리소스(Gateway/HTTPRoute/LoadBalancerConfiguration/backend·frontend TargetGroupConfiguration)는 네임스페이스 자체가 달라서 이름이 겹쳐도 안전.
+
+Helm 릴리즈 이름도 env를 넣어 유일하게 만듦(`gateway-api-app-release`/`gateway-api-app-prod`) — 안 그러면 같은 `kube-system` 네임스페이스에 같은 릴리즈 이름 두 개가 충돌.
+
+### 새로 겪은 버그 — TargetGroupConfiguration targetType 기본값이 ClusterIP Service에서 실패
+
+`alloy-faro` Service(`ClusterIP`)용 `TargetGroupConfiguration`에 `targetType`을 명시 안 했다가(오늘 Ingress의 `faro_ingress`도 `target-type` annotation이 없었던 걸 그대로 반영한 것) `Gateway`가 `Accepted: False`로 실패함 — 자세한 내용은 [[../troubleshooting/gateway-api-instance-target-type-clusterip-service]]. `targetType: ip`로 고쳐서 해결. **이건 Gateway API의 새 버그가 아니라 원래 있던 잠재 버그** — `alloy-faro`/`faro_ingress`가 이날 이전엔 한 번도 실제로 끝까지 배포된 적이 없어서(다른 이유로 pending 상태였음) Ingress로도 이 문제를 겪을 기회 자체가 없었을 뿐.
+
+### 다운타임
+
+`dev.jun979.click`/`app.jun979.click` 둘 다 Ingress→Gateway API 전환 순간 몇 분(ALB provisioning + DNS 전파)의 다운타임이 있었음 — release는 실제 팀 트래픽이 있는 환경이라 사전에 사용자에게 고지하고 진행. "옛 Ingress destroy 먼저 → 새 Gateway apply 나중"으로 나누면 오히려 순차 실행돼서 다운타임이 더 길어지므로, 같은 apply 안에서 병렬로 처리(자세한 논의는 이 문서 초안 작성 대화 참고, 별도 기록은 안 함).
+
+### 검증 결과
+
+- `GatewayClass Accepted: True` (공유), release/prod `Gateway` 둘 다 실제 ALB(`team5-qket-gw-release-alb`/`team5-qket-gw-prod-alb`) 생성
+- `HTTPRoute`: release는 backend/frontend/faro 전부 `ResolvedRefs: True`. prod는 `qket-backend-service`/`qket-frontend-service`가 아직 배포 전이라(실서비스 오픈 전) `BackendNotFound` — Gateway/ALB 자체는 정상, 이후 팀이 prod에 앱을 배포하면 자동으로 resolve될 예정
+- ExternalDNS가 `dev.jun979.click`/`app.jun979.click` A/AAAA 레코드를 새 ALB로 실제로 UPSERT함(Route53에서 직접 확인)
+- 기존 `app_ingress_backend`/`app_ingress_frontend`/`faro_ingress` 3개 리소스는 코드에서 완전히 제거, 옛 ALB(`team5-qket-alb`)의 관련 규칙도 정상적으로 사라짐
+
+### 트레이드오프 / 남은 리스크
+
+- `ssl-redirect`(HTTP→HTTPS)는 `RequestRedirect` HTTPRoute filter로 구현, 실제 302/301 리다이렉트 동작까지는 아직 브라우저로 직접 확인 안 함(TargetGroup/DNS 레벨 검증까지만 완료) — 다음에 실제로 브라우저 접속해서 확인 필요
+- prod의 backend/frontend가 실제 배포된 뒤 `HTTPRoute ResolvedRefs`가 자동으로 `True`로 바뀌는지 재확인 필요
+- 3단계(admin — Grafana/ArgoCD) 전부 미착수
 
 ## 관련
 - [[../troubleshooting/alb-controller-gatewayapi-boot-time-crd-check]]
