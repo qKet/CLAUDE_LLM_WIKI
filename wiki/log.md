@@ -805,3 +805,14 @@ Gateway API 마이그레이션(release+prod+admin 컷오버) 완료 직후, `Inf
 - index.md 갱신 — 🔴 표시로 미머지 상태 명시
 
 **남은 것**: PR #41 머지 및 배포 후 재검증(로그인 없이 `/api/admin/categories` 호출 시 `ADMIN_ONLY`로 차단되는지) 필요. 이 세션에서는 안 함.
+
+## [2026-08-21] Claude Code | troubleshooting | release backend/frontend KEDA 상한을 dev-mysql 실측치 + "개발서버는 가볍게" 방침으로 재조정
+
+`CD/helm/values-prod.yaml`을 `values-release.yaml`과 비교/정렬하던 중, 사용자가 release의 `dbPoolSize(12)×maxReplicas(20)=240`을 보고 직접 "이거 240개가 생겨버리는데 괜찮냐"고 지적. `dev-mysql-0` pod에 접속해 확인해보니 실제 `max_connections=151`(MySQL 8.0 기본값, 커스텀 설정 없음) — release가 RDS(db.t3.medium, 341)에서 dev-datastore로 옮겨가면서 240이라는 상한의 근거 자체가 사라진 채 방치돼 있었음. `Max_used_connections` 실측 피크가 62에 불과해서 지금까지 실제 장애로는 안 터졌을 뿐.
+
+1차로 `maxReplicas: 20→8`(12×8=96, 151의 64%)로 커넥션 초과만 우선 해결했다가, 같은 세션에서 사용자가 "release는 어차피 개발 서버니까 최대한 가볍게, 꼭 필요한 만큼만 띄우고 싶다"고 방향을 좁혀서 최종적으로 `minReplicas 1 / maxReplicas 2`(backend/frontend 둘 다, 초기 `replicas`도 4→1)로 재조정. `helm template`로 렌더링 확인, 에러 없음.
+
+같은 흐름에서 prod 쪽도 release와 비교해 아래 필드들이 (레이어링 구조상) release 값을 암묵적으로 상속하고 있던 걸 발견해 명시적으로 채워 넣음: `backend.autoscaling`/`dbPoolSize`(prod RDS db.t3.small, max_connections≈170 기준 재계산), `frontend.autoscaling`, `frontend.revisionHistoryLimit`, `networkPolicy.ports`. 이 과정에서 헤더의 스테일한 IRSA TODO 주석도 정리(이미 해결된 상태였음을 kubectl로 확인).
+
+- [[troubleshooting/release-dev-mysql-max-connections-mismatch]] 신설
+- `CD/helm/values-prod.yaml`/`values-release.yaml`은 CD 레포 규칙대로 커밋은 안 하고 로컬 수정만 함 — 사용자가 직접 review 후 commit 필요

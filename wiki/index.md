@@ -85,6 +85,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[alb-controller-gatewayapi-boot-time-crd-check]] — Gateway API 마이그레이션 1단계 중 발견: AWS Load Balancer Controller는 자기 파드 부팅 시점에 딱 한 번 Gateway API CRD 존재 여부를 확인해서 기능을 켤지 정함 — CRD가 컨트롤러보다 나중에 생기면 `kubectl rollout restart`로 재부팅해야만 정상화됨. `module.gateway_api_crds`를 `module.alb_controller`보다 먼저 apply되도록 depends_on 방향을 설계해서 매일 아침 이 문제가 재발하지 않게 해결 — **해결됨**
 - [[gateway-api-instance-target-type-clusterip-service]] — release+prod 완전 컷오버 중 발견: `TargetGroupConfiguration.targetType` 기본값(instance)이 ClusterIP 서비스(alloy-faro)에서 `Gateway`를 통째로 `Accepted: False`로 실패시킴 — `targetType: ip` 명시로 해결. 이어서 걸린 헬스체크 경로 문제(`/`→404, `/collect`→405)도 Grafana Alloy 표준 엔드포인트 `/-/ready`로 해결 — **해결됨**
 - 🔴 [[admin-interceptor-context-path-bypass]] — **치명적 보안 버그**: `AdminAccessInterceptor`가 `getRequestURI()`(context-path `/api` 포함)로 경로를 읽어서 `"/admin"` 접두어 매칭이 절대 안 됨 — 로그인 없이/일반 회원으로 관리자 API(카테고리/사용자/프로그램/메뉴/예약이력/공연관리) 전체 조회·등록·수정·삭제가 가능했던 상태. `getServletPath()`로 교체해서 코드 수정 완료, [qKet/backend#41](https://github.com/qKet/backend/pull/41)로 PR — **머지 대기 중, 배포 전까지는 라이브에 여전히 취약점 존재**
+- [[release-dev-mysql-max-connections-mismatch]] — `CD/helm/values-release.yaml`의 `backend.dbPoolSize(12)×maxReplicas(20)=240`이 release가 dev-datastore로 옮겨간 뒤 실제 dev-mysql의 `max_connections`(151, MySQL 기본값)를 초과한 채 방치돼 있던 걸 발견(사용자 직접 지적) — 실제 장애로 터지기 전에 발견. 커넥션 계산만 맞추는 선(maxReplicas 8)을 넘어, "release는 개발 서버니까 최대한 가볍게"라는 방침에 따라 backend/frontend 전부 `minReplicas 1 / maxReplicas 2`로 최종 재조정 — **해결됨**
 
 ## runbook/ — 반복 운영 절차
 - [[db-schema-change]] — 로컬 DB 스키마 변경 절차 2가지
