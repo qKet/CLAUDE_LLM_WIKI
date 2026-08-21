@@ -827,3 +827,13 @@ Gateway API 마이그레이션(release+prod+admin 컷오버) 완료 직후, `Inf
 - `helm template`로 렌더링 확인, 에러 없음
 - CD 레포는 규칙대로 커밋 안 함 — 사용자가 review 후 commit/PR/ArgoCD 싱크 필요, 현재 살아있는 CrashLoop 파드 4개는 이번 세션에서 라이브 패치 안 하고 그대로 둠(사용자 선택)
 - [[backend-cold-start-cpu-contention-during-rollout]]에 2026-08-21 재현/해결 노트 추가, index.md 갱신
+
+## [2026-08-21] Claude Code | troubleshooting | topologySpreadConstraints ScheduleAnyway→DoNotSchedule (Karpenter 신규노드 몰림 재발)
+
+앞서 적용한 `topologySpreadConstraints`(`whenUnsatisfiable: ScheduleAnyway`)를 배포하고 사용자가 재검증차 부하테스트를 다시 돌렸는데, 똑같이 backend 파드 4개가 한 노드에 몰려서 재시작되는 게 재현됨. 실제 스케줄링 이벤트(`kubectl describe pod`)로 원인 특정: 스케일업 순간 기존 노드 2개가 전부 CPU 요청량 90%+로 꽉 차있어서 `FailedScheduling: Insufficient cpu` → Karpenter가 신규 파드 4개를 전부 수용할 새 노드를 "비용 최적화상 하나만" 프로비저닝. `topologySpreadConstraints`는 "이미 존재하는 노드들 사이" 분산 규칙이라 애초에 분산시킬 다른 노드가 없었고, `ScheduleAnyway`(소프트)라 이 배치를 그냥 허용해버림.
+
+`whenUnsatisfiable`을 `DoNotSchedule`(하드 제약)로 변경 — `CD/helm/templates/backend-deployment.yaml`/`frontend-deployment.yaml` 둘 다. Karpenter가 스케줄링 시뮬레이션 단계에서 이 제약을 필수 조건으로 인식해서, 필요하면 새 노드를 여러 개로 나눠 만들어서라도 분산을 강제하게 됨 — 고정 노드풀이었다면 "제약 못 맞추면 Pending" 위험이 컸겠지만 Karpenter가 있어서 그 위험이 낮다고 판단.
+
+- `helm template` 렌더링 확인, 에러 없음
+- [[backend-cold-start-cpu-contention-during-rollout]]에 후속 노트 추가
+- CD 레포는 규칙대로 커밋 안 함 — 사용자가 review 후 commit 필요

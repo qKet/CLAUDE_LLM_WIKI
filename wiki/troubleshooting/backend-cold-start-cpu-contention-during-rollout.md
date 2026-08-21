@@ -11,8 +11,17 @@ updated: 2026-08-21
 > → Karpenter 신규 노드 프로비저닝 → 그 노드에 몰려서 뜨는 패턴까지 동일하게 확인됨). 아래
 > "재발 방지"의 `topologySpreadConstraints` 권고를 실제로 적용함 — `CD/helm/templates/
 > backend-deployment.yaml`/`frontend-deployment.yaml` 둘 다 `maxSkew: 1`,
-> `topologyKey: kubernetes.io/hostname`, `whenUnsatisfiable: ScheduleAnyway`로 추가(`helm
-> template` 렌더링 확인). CD 레포 커밋/배포는 사용자 몫 — 이 세션에서는 코드만 반영.
+> `topologyKey: kubernetes.io/hostname`로 추가(`helm template` 렌더링 확인). CD 레포
+> 커밋/배포는 사용자 몫 — 이 세션에서는 코드만 반영.
+>
+> 🔴 **같은 날 후속 — `ScheduleAnyway`(소프트)로는 이 문제가 그대로 재현됨.** 배포 후 돌린
+> 다음 부하테스트에서 실제 스케줄링 이벤트를 확인해보니 `FailedScheduling: 0/2 nodes are
+> available: 2 Insufficient cpu` — 스케일업 순간 기존 노드가 전부 이미 꽉 차있어서, Karpenter가
+> 신규 파드 4개 전부를 수용할 새 노드를 "비용 최적화상 하나만" 만들어버림. `topologySpreadConstraints`는
+> "이미 있는 노드들 사이" 분산 규칙이라 애초에 분산시킬 다른 노드 자체가 없었고,
+> `ScheduleAnyway`라 이 상황(제약을 못 지키는 배치)을 그냥 허용해버림. `whenUnsatisfiable`을
+> `DoNotSchedule`(하드 제약)로 변경 — Karpenter가 있어서 "제약 못 맞추면 Pending" 위험이 낮고,
+> 대신 필요하면 노드를 여러 개로 나눠 만들어서라도 분산을 강제하게 됨.
 
 # 새 backend 파드 동시 콜드스타트 CPU 경합 — 두 번 재현(KEDA 스케일업, 롤링배포)
 
