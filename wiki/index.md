@@ -84,6 +84,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[crd-not-yet-installed-on-fresh-apply]] — 매일 밤 `02_k8s-addon`을 destroy했다가 아침에 처음부터 재적용할 때마다 3일 연속 재현된 CRD 순서 문제 2건(ServiceMonitor, SecretStore) — `kubernetes_manifest`/`kubectl_manifest`가 plan 시점에 CRD 존재를 요구하는 게 근본 원인. **2026-08-20 후속**: 둘 다 `helm_release` 기반으로 전환해서 ServiceMonitor는 완전히 해결(targeted apply 불필요), SecretStore는 cross-root(04_data ESO) 문제라 `module.eso` 선적용은 여전히 필요하나 실패 범위는 대폭 축소됨
 - [[alb-controller-gatewayapi-boot-time-crd-check]] — Gateway API 마이그레이션 1단계 중 발견: AWS Load Balancer Controller는 자기 파드 부팅 시점에 딱 한 번 Gateway API CRD 존재 여부를 확인해서 기능을 켤지 정함 — CRD가 컨트롤러보다 나중에 생기면 `kubectl rollout restart`로 재부팅해야만 정상화됨. `module.gateway_api_crds`를 `module.alb_controller`보다 먼저 apply되도록 depends_on 방향을 설계해서 매일 아침 이 문제가 재발하지 않게 해결 — **해결됨**
 - [[gateway-api-instance-target-type-clusterip-service]] — release+prod 완전 컷오버 중 발견: `TargetGroupConfiguration.targetType` 기본값(instance)이 ClusterIP 서비스(alloy-faro)에서 `Gateway`를 통째로 `Accepted: False`로 실패시킴 — `targetType: ip` 명시로 해결. 이어서 걸린 헬스체크 경로 문제(`/`→404, `/collect`→405)도 Grafana Alloy 표준 엔드포인트 `/-/ready`로 해결 — **해결됨**
+- 🔴 [[admin-interceptor-context-path-bypass]] — **치명적 보안 버그**: `AdminAccessInterceptor`가 `getRequestURI()`(context-path `/api` 포함)로 경로를 읽어서 `"/admin"` 접두어 매칭이 절대 안 됨 — 로그인 없이/일반 회원으로 관리자 API(카테고리/사용자/프로그램/메뉴/예약이력/공연관리) 전체 조회·등록·수정·삭제가 가능했던 상태. `getServletPath()`로 교체해서 코드 수정 완료, [qKet/backend#41](https://github.com/qKet/backend/pull/41)로 PR — **머지 대기 중, 배포 전까지는 라이브에 여전히 취약점 존재**
 
 ## runbook/ — 반복 운영 절차
 - [[db-schema-change]] — 로컬 DB 스키마 변경 절차 2가지

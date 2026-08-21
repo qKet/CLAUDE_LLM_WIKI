@@ -792,3 +792,16 @@ Gateway API 마이그레이션(release+prod+admin 컷오버) 완료 직후, `Inf
 - prod가 실패한 첫 apply의 고아 역할(`team5-qket-eso-role-prod`, 아무 SA도 미참조 확인됨)은 `aws iam delete-role-policy`/`delete-role`로 직접 정리
 - release/prod `module.eso`를 targeted apply로 마무리 — release는 인라인 정책 이름 교체(1 destroy+1 create), prod는 SecretStore/ExternalSecret 3종 이 세션에서 처음 정상 생성
 - 마이그레이션 내내 `external-secrets` 컨트롤러 파드 RESTARTS 0 유지, 3개 root 전부 `terraform plan` "No changes" 확인
+
+---
+
+## [2026-08-21] Claude Code | troubleshooting | 관리자 API 인가 우회 치명적 보안 버그 발견·수정
+
+대시보드 확인 및 개발 잡담 중 우연한 계기로 백엔드 인가 구조를 점검하다가 발견. `AdminAccessInterceptor`가 `request.getRequestURI()`로 경로를 읽는데, `context-path: /api` 때문에 `"/admin"` 접두어 매칭이 단 한 번도 성립하지 않아 관리자 API 인가 검사가 전체적으로 스킵되고 있었음.
+
+- 실제 라이브(`dev.jun979.click`)에서 로그인 없이 `GET /api/admin/categories` 호출 → 200 OK로 실데이터 반환되는 것 직접 확인(대조군으로 컨트롤러 자체 체크가 남아있는 `/api/reservations/my`는 정상 차단되는 것도 같이 확인해서 인터셉터만의 문제임을 특정)
+- `request.getServletPath()`로 교체해서 수정, `backend` hotfix 브랜치로 `release`에 PR 올림([qKet/backend#41](https://github.com/qKet/backend/pull/41)) — 심각도 높은 보안 이슈라 사용자가 직접 리뷰 후 머지하기로 함, 이 세션에서는 머지 안 함
+- [[troubleshooting/admin-interceptor-context-path-bypass]] 신설 — 근본 원인(2026-08-18 리팩터링에서 개별 컨트롤러 체크를 인터셉터 하나로 통합하면서 생긴 단일 장애점 구조), 재발 방지 포함
+- index.md 갱신 — 🔴 표시로 미머지 상태 명시
+
+**남은 것**: PR #41 머지 및 배포 후 재검증(로그인 없이 `/api/admin/categories` 호출 시 `ADMIN_ONLY`로 차단되는지) 필요. 이 세션에서는 안 함.
