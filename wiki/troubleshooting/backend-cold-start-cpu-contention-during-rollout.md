@@ -3,8 +3,16 @@ title: 새 backend 파드가 한 노드에 몰려서 뜰 때 JVM 콜드스타트
 category: troubleshooting
 tags: [keda, karpenter, jvm, cpu-throttling, rollout, load-test]
 created: 2026-08-20
-updated: 2026-08-20
+updated: 2026-08-21
 ---
+
+> 🟢 2026-08-21: prod에서 실제로 재현됨(2000명 e2e 부하테스트 중, backend 8/8 스케일업 자체는
+> 성공했으나 신규 파드 4개가 CPU 103%까지 찬 노드 하나에 몰려서 재시작 반복 — `FailedScheduling`
+> → Karpenter 신규 노드 프로비저닝 → 그 노드에 몰려서 뜨는 패턴까지 동일하게 확인됨). 아래
+> "재발 방지"의 `topologySpreadConstraints` 권고를 실제로 적용함 — `CD/helm/templates/
+> backend-deployment.yaml`/`frontend-deployment.yaml` 둘 다 `maxSkew: 1`,
+> `topologyKey: kubernetes.io/hostname`, `whenUnsatisfiable: ScheduleAnyway`로 추가(`helm
+> template` 렌더링 확인). CD 레포 커밋/배포는 사용자 몫 — 이 세션에서는 코드만 반영.
 
 # 새 backend 파드 동시 콜드스타트 CPU 경합 — 두 번 재현(KEDA 스케일업, 롤링배포)
 
@@ -41,7 +49,7 @@ CloudWatch `HealthyHostCount`(대상 타겟그룹)로 직접 확인:
 - Deployment `strategy.rollingUpdate`에 `maxUnavailable: 0`을 고려할 수 있음(옛 파드를 새 파드가 완전히 Ready된 뒤에만 내리는 방식) — 다만 `maxSurge`만으로 여유 용량을 확보해야 해서 순간적으로 필요한 파드 수가 더 늘어남(비용/노드 여유 트레이드오프).
 - `PodDisruptionBudget`으로 롤아웃 중에도 최소 가용 개수를 강제하는 것도 검토 가능.
 - 근본적으로는 [[frontend-cpu-throttling-cfs-quota-vs-jvm-tradeoff]]에서 frontend에 적용했던 것처럼 **backend도 CPU limit을 없애고 request 기반 fair-share로 전환**하는 방법이 있으나, backend는 JVM이 `ActiveProcessorCount`를 cgroup 쿼터에서 자동으로 추론하는 구조라 limit을 없애면 스레드풀이 과다 산정될 위험이 있어(이미 문서화된 트레이드오프) 신중한 검토 필요.
-- 하나의 근본 해결책 후보: **파드 분산 강제**(topologySpreadConstraints/anti-affinity)로 같은 배포 이벤트에서 여러 신규 파드가 같은 노드에 몰리지 않게 하는 것 — 아직 미적용.
+- ✅ (적용, 2026-08-21) **파드 분산 강제**(topologySpreadConstraints/anti-affinity)로 같은 배포 이벤트에서 여러 신규 파드가 같은 노드에 몰리지 않게 하는 것 — 위 알림 참고.
 
 ## 관련
 - [[hikaricp-pool-stale-sizing-after-rds-upgrade]]

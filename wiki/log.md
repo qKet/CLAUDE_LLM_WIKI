@@ -816,3 +816,14 @@ Gateway API 마이그레이션(release+prod+admin 컷오버) 완료 직후, `Inf
 
 - [[troubleshooting/release-dev-mysql-max-connections-mismatch]] 신설
 - `CD/helm/values-prod.yaml`/`values-release.yaml`은 CD 레포 규칙대로 커밋은 안 하고 로컬 수정만 함 — 사용자가 직접 review 후 commit 필요
+
+## [2026-08-21] Claude Code | troubleshooting | backend 콜드스타트 CPU 경합이 prod에서 재현 → topologySpreadConstraints 실제 적용
+
+사용자가 prod에서 2000명 e2e 부하테스트를 돌리던 중 ArgoCD 리소스 트리에서 backend 파드 8개 중 4개가 반복 재시작되는 걸 발견해 문의. 실측 확인 결과 [[backend-cold-start-cpu-contention-during-rollout]](2026-08-20, release에서 처음 발견)와 완전히 같은 메커니즘 — KEDA가 8/8로 스케일업하는 것 자체는 성공(`HPA: cpu 59%/70%, REPLICAS 8/8`)했지만, `FailedScheduling`(Insufficient cpu) → Karpenter가 새 노드 프로비저닝 → 그 새 노드 하나에 신규 파드 4개가 몰려서 뜸 → 노드 CPU 103%까지 포화 → JVM 콜드스타트(HikariCP 12개 커넥션 동시 오픈 등) 버스트가 겹쳐서 readiness/liveness 실패 → `Exit Code 143`(SIGTERM)로 반복 재시작.
+
+그 문서가 "미적용"으로 남겨뒀던 근본 해결책(`topologySpreadConstraints`)을 실제로 적용:
+- `CD/helm/templates/backend-deployment.yaml`/`frontend-deployment.yaml` 둘 다 `maxSkew: 1`, `topologyKey: kubernetes.io/hostname`, `whenUnsatisfiable: ScheduleAnyway`, 각자 자기 라벨(`app: qket-backend`/`qket-frontend`)로 추가
+- frontend도 포함시킨 이유: frontend는 CPU limit이 없어서(request 기반 fair-share) 여러 파드가 한 노드에 몰리면 그 노드를 무제한으로 끌어다 쓰다 같은 노드의 backend까지 덩달아 굶길 수 있다고 판단
+- `helm template`로 렌더링 확인, 에러 없음
+- CD 레포는 규칙대로 커밋 안 함 — 사용자가 review 후 commit/PR/ArgoCD 싱크 필요, 현재 살아있는 CrashLoop 파드 4개는 이번 세션에서 라이브 패치 안 하고 그대로 둠(사용자 선택)
+- [[backend-cold-start-cpu-contention-during-rollout]]에 2026-08-21 재현/해결 노트 추가, index.md 갱신
