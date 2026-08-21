@@ -750,3 +750,25 @@ Gateway API 마이그레이션(release+prod+admin 컷오버) 완료 직후, `Inf
 - [[decisions/2026-08-21-release-datastore-rds-to-statefulset]] 갱신 — `db-secrets`/`redis-secrets`를 ESO 재사용에서 `modules/addons/eso`의 `manage_db_redis_secrets` 스위치 + release 전용 plain `kubernetes_secret`으로 최종 변경(RDS와 달리 dev-mysql은 로테이션이 없어서 ESO의 자동 재동기화가 무의미하다는 게 근거). 그 과정에서 "비밀번호를 매일 밤 재생성하면 안 되는 이유"(MySQL 이미지가 데이터 디렉터리 있으면 MYSQL_ROOT_PASSWORD를 다시 안 읽음), "그럼 실제 로테이션은 어떻게 하나"(ALTER USER 기반 CronJob 설계까지 구체적으로 짚었으나 작업량 대비 실익 낮다고 판단해 기각, 수동 로테이션 절차만 문서화)를 사용자와 논의 — **최종적으로 dev-mysql 비밀번호는 영구 고정(장기 키)으로 의도적 수용, 네트워크가 클러스터 내부 전용이라는 게 근거**. `kubectl exec`/`kubectl port-forward`+Workbench 접근 방법도 함께 정리
 - CD 레포 대응은 아직 미착수 — 사용자가 직접 처리 예정. 처음엔 "DB_HOST/REDIS_HOST를 CD에서 하드코딩"으로 얘기했다가, `app-config` ConfigMap이 이미 CD의 `configMaps` 목록에 있다는 걸 확인하고 그 ConfigMap에 `DB_HOST=dev-mysql`/`REDIS_HOST=dev-redis`를 직접 추가하는 쪽으로 정정 — **CD 코드는 안 건드려도 됨**, `backend.secrets`에서 `redis-secrets`만 빼면 끝
 - 같은 흐름에서: 처음엔 `modules/backend_sqs_permission`이라는 새 모듈로 백엔드→SQS IAM 정책을 뽑았다가, "IAM은 새 모듈 폴더가 아니라 관련 리소스 모듈 안 `iam.tf`로 분리하는 게 이 레포 컨벤션"이라는 지적을 받고 `modules/sqs/iam.tf`(`sender_role_name` 변수)로 재배치 — release 쪽은 `terraform state mv`로 재생성 없이 이어붙임
+
+---
+
+## [2026-08-21] Claude Code | decision | Grafana/ArgoCD 관리자 비밀번호를 Secrets Manager로 미러링
+
+02_k8s-addon이 매일 밤 destroy/재생성되면서 Grafana/ArgoCD 관리자 비밀번호도 차트가 매번 새로 자동 생성 — 매일 `kubectl get secret`으로 까봐야 하는 게 번거롭다는 지적. 고정 비밀번호는 보안상 원치 않아서, 절충안으로 **비밀번호는 그대로 매일 자동 생성되게 두고 그 값만 AWS Secrets Manager로 미러링**하기로 함.
+
+- `modules/addons/monitoring`: `data.kubernetes_secret`으로 `monitoring-grafana` Secret(admin-user/admin-password) 읽어서 `team5-qket-grafana-admin` Secrets Manager 시크릿에 그대로 씀
+- `modules/addons/argocd`: 같은 패턴으로 `argocd-initial-admin-secret`(password)을 `team5-qket-argocd-admin`에 미러링
+- 둘 다 `ignore_changes` 안 걸어서 apply할 때마다 최신값으로 덮어써짐(값이 매일 바뀌는 게 의도된 동작이라)
+- 5개 root(`01_infrastructure`/`02_k8s-addon`/`03_registry`/`04_data/release`/`04_data/prod`) 전부 `terraform validate` 통과
+
+같은 세션에서 실제 첫 전체 apply를 진행하며 두 가지 실제 버그도 발견/수정:
+- **EBS CSI addon이 DEGRADED로 20분 타임아웃** — 2026-08-20 노드그룹을 Karpenter로 전면 교체하면서, `01_infrastructure`가 이 addon을 설치하는 시점엔 노드가 0개라(Karpenter는 02_k8s-addon 소속, 더 늦게 적용) 컨트롤러/데몬셋 파드가 영원히 Pending → addon이 DEGRADED. 해결: (1) ebs_csi를 01_infrastructure에서 02_k8s-addon(Karpenter 다음)으로 이전, (2) 그래도 Karpenter 자신도 뜰 노드가 있어야 해서(2026-08-20 문서화된 별개 데드락과 같은 근본 원인) 관리형 노드그룹을 최소 1개(desired/min/max=1 고정, 나머지 스케일링은 Karpenter 전담)로 재도입
+- **`module.gateway_api_faro`의 `depends_on`에 `module.monitoring` 누락** — 이 모듈 차트가 만드는 ReferenceGrant가 "monitoring" 네임스페이스에 생성되는데 그 네임스페이스를 만드는 module.monitoring보다 먼저 실행돼서 "namespaces monitoring not found"로 실패 — depends_on 추가로 해결
+
+이 세션에서 그 외에도 대대적인 모듈 재구성 진행(전부 terraform validate 통과, 실제 라이브 리소스는 terraform state mv로 재생성 없이 이전):
+- `modules/acm`(신규, ACM+DNS검증 범용 모듈) — grafana/argocd/dev/app 인증서 4개 전부 여기로 통합, **02_k8s-addon이 아니라 03_registry에 둬야 함**(같은 이유: 02_k8s-addon 소속이면 매일 밤 인증서가 통째로 재발급되고 DNS 재검증까지 거쳐야 해서 위험) — 처음엔 gateway-api-admin 모듈 안에 중첩했다가 이 이유로 03_registry로 이전
+- `modules/ebs_volume`(신규, 범용) — 03_registry의 dev-mysql/dev-redis EBS 볼륨 2개가 여기서 나옴
+- `modules/backend_sqs_permission` 대신 `modules/sqs/iam.tf`(기존 모듈에 IAM 통합, `sender_role_name` 변수) — "IAM은 새 모듈 폴더가 아니라 관련 리소스 모듈 안에 iam.tf로"라는 기존 컨벤션 재확인
+- `modules/addons/argocd`(신규) — helm_release+Application 등록을 여기로, `modules/addons/argocd/notifications-secrets/`(구 `argocd-notifications-secrets`)를 그 밑에 중첩, Grafana 대시보드 ConfigMap도 `modules/addons/monitoring`으로 편입
+- 실제 apply 중 겪은 ACM 재검증 특성: 같은 도메인(dev/app)에 새 인증서를 요청하면 ACM이 기존에 이미 검증됐던 것과 **완전히 동일한 DNS 검증 CNAME**을 다시 내려줘서 Route53 레코드 생성이 "already exists"로 충돌 — `terraform import`로 기존 레코드를 새 모듈 state 주소로 가져와서 해결(destroy 없이)
