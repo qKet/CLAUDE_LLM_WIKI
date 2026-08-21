@@ -63,18 +63,14 @@ release/prod 분리) 구조에 `count`/삼항식 분기가 여러 곳(`module.rd
   각각 존재. 앞으로 이 부분을 고칠 일이 생기면 **두 디렉토리를 항상 같이 고쳐야 함** — 하나만 고치고
   깜빡하면 release/prod가 조용히 어긋나는(drift) 위험이 있음. (오늘 이 세션에서 이미 겪은 MySQL
   비밀번호 드리프트, 브랜치 혼동과 같은 성격의 리스크.)
-- **⚠️ 이번 분리 작업 중 발견한, 분리와 무관하게 이미 있던 잠재 버그**: `modules/addons/eso`의
+- **✅ (해결, 2026-08-21) 이번 분리 작업 중 발견한, 분리와 무관하게 이미 있던 잠재 버그**: `modules/addons/eso`의
   `helm_release "external_secrets"`(ESO 컨트롤러 자체)가 `name`/`namespace`를 environment로 구분하지
   않고 완전히 고정값(`external-secrets`/`external-secrets`)으로 씀 — 원래 "공유 컨트롤러"로 의도된
   것으로 보임(`modules/addons/argocd-notifications-secrets/chart/Chart.yaml` 주석에도 "04_data가 설치한
-  ESO(공유 컨트롤러)"라고 되어 있음). 그런데 release/prod가 각자 자기 `module.eso`를 통해 이 리소스를
-  **각자의 state로 독립적으로 apply**하므로, prod를 처음 apply하는 순간 release가 이미 설치해둔 것과
-  이름이 겹치는 Helm 릴리즈를 또 설치하려다 실패(`cannot re-use a name that is still in use`)할 가능성이
-  높음. **이 문제는 오늘 도입한 게 아니라 애초에 workspace 기반 구조에서도 이미 있었음**(prod가 한 번도
-  apply된 적이 없어서 지금까지 안 드러났을 뿐). release/prod 분리와 별개로 언젠가 고쳐야 함 — 후보:
-  ESO 컨트롤러(helm_release)만 진짜 공유 singleton으로 `02_k8s-addon`(공유 애드온 root)으로 옮기고,
-  release/prod 각 `module.eso`는 SecretStore/ExternalSecret(네임스페이스별로 이미 분리돼있음)만 담당하게
-  재설계. **아직 미착수.**
+  ESO(공유 컨트롤러)"라고 되어 있음). 실제로 prod를 처음 apply하며 이름 충돌(`EntityAlreadyExists`)과
+  CRD 소유권 충돌(`invalid ownership metadata`)이 둘 다 재현됨. **후보로 남겨뒀던 "ESO 컨트롤러만 진짜
+  공유 singleton으로 02_k8s-addon으로 옮기기"를 그대로 실행함** — [[2026-08-21-eso-controller-shared-singleton]]
+  참고.
 - release/prod 각각의 `terraform validate`는 통과했고, release는 `terraform state list`로 기존
   리소스(RDS/Redis/SG 등)를 정상적으로 이어받는 것까지 확인함. 다만 실제 `terraform plan`은 이 분리
   시점 기준 `01_infrastructure`가 야간 destroy 상태라 출력값이 비어있어 확인 못함 — 다음에 인프라가 켜져

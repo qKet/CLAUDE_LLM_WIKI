@@ -772,3 +772,14 @@ Gateway API 마이그레이션(release+prod+admin 컷오버) 완료 직후, `Inf
 - `modules/backend_sqs_permission` 대신 `modules/sqs/iam.tf`(기존 모듈에 IAM 통합, `sender_role_name` 변수) — "IAM은 새 모듈 폴더가 아니라 관련 리소스 모듈 안에 iam.tf로"라는 기존 컨벤션 재확인
 - `modules/addons/argocd`(신규) — helm_release+Application 등록을 여기로, `modules/addons/argocd/notifications-secrets/`(구 `argocd-notifications-secrets`)를 그 밑에 중첩, Grafana 대시보드 ConfigMap도 `modules/addons/monitoring`으로 편입
 - 실제 apply 중 겪은 ACM 재검증 특성: 같은 도메인(dev/app)에 새 인증서를 요청하면 ACM이 기존에 이미 검증됐던 것과 **완전히 동일한 DNS 검증 CNAME**을 다시 내려줘서 Route53 레코드 생성이 "already exists"로 충돌 — `terraform import`로 기존 레코드를 새 모듈 state 주소로 가져와서 해결(destroy 없이)
+
+## [2026-08-21] Claude Code | decision | ESO 컨트롤러를 02_k8s-addon 공유 singleton으로 이전
+
+[[decisions/2026-08-21-04data-split-release-prod-directories]]에서 발견해뒀던 잠재 버그(ESO 컨트롤러가 release/prod 구분 없이 고정 name/namespace를 씀)가 prod 첫 apply 시도로 실제 재현됨: `EntityAlreadyExists`(IAM Role 이름 충돌) → 임시로 environment 접미사를 붙였더니 `invalid ownership metadata`(CRD 소유권 충돌, CRD는 네임스페이스와 무관하게 클러스터에 하나뿐이고 Helm이 단일 소유권을 강제). 사용자가 "공통으로 쓰는 eso는 02번에서 만들면 되는 거 아니냐"고 지적 — 두 문서에서 이미 후보로 남겨뒀던 방향을 실행.
+
+- `modules/addons/eso-controller`(신규) — Helm 릴리즈(CRD 포함)+IRSA 역할만 담당, `02_k8s-addon`에서 딱 한 번 호출. `extra_secret_arns`로 이 root 안에서 쓰는 시크릿(ArgoCD 알림용 Gmail)도 여기서 바로 정책 부여
+- `modules/addons/eso`(기존) — 더 이상 컨트롤러/역할을 안 만들고, `eso_role_name`(공유 역할 이름)을 받아 자기 환경 시크릿만큼 `aws_iam_role_policy`만 추가로 붙임. SecretStore/ExternalSecret 생성은 그대로 유지
+- `04_data/release`·`04_data/prod`에 `data.terraform_remote_state.k8s_addon` 추가(신규 `eso_role_name` output을 읽기 위함), 둘 다 이제 안 쓰는 `helm` provider 제거
+- 부수 효과: `modules/addons/argocd/notifications-secrets`가 겪던 cross-root CRD 순서 문제([[crd-not-yet-installed-on-fresh-apply]] — ESO가 04_data라는 "나중" root에 있어서 매일 "04_data의 module.eso를 먼저 apply"해야 했던 런북)도 함께 해소됨. `module.argocd`가 이제 같은 root의 `module.eso_controller`에 `depends_on`을 걸 수 있어서.
+- 3개 root(`02_k8s-addon`/`04_data/release`/`04_data/prod`) 전부 `terraform validate` 통과 확인
+- **미착수**: release가 이미 만들어둔 environment-접미사 리소스(`team5-qket-eso-role-release` 등) 정리 — 다음 실제 apply 전에 수동 조치 필요, 자세한 내용은 [[decisions/2026-08-21-eso-controller-shared-singleton]] 참고
