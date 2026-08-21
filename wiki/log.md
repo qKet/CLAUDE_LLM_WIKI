@@ -783,3 +783,12 @@ Gateway API 마이그레이션(release+prod+admin 컷오버) 완료 직후, `Inf
 - 부수 효과: `modules/addons/argocd/notifications-secrets`가 겪던 cross-root CRD 순서 문제([[crd-not-yet-installed-on-fresh-apply]] — ESO가 04_data라는 "나중" root에 있어서 매일 "04_data의 module.eso를 먼저 apply"해야 했던 런북)도 함께 해소됨. `module.argocd`가 이제 같은 root의 `module.eso_controller`에 `depends_on`을 걸 수 있어서.
 - 3개 root(`02_k8s-addon`/`04_data/release`/`04_data/prod`) 전부 `terraform validate` 통과 확인
 - **미착수**: release가 이미 만들어둔 environment-접미사 리소스(`team5-qket-eso-role-release` 등) 정리 — 다음 실제 apply 전에 수동 조치 필요, 자세한 내용은 [[decisions/2026-08-21-eso-controller-shared-singleton]] 참고
+
+## [2026-08-21] Claude Code | decision | ESO 공유 singleton 이전 실제 적용 완료 (무중단)
+
+앞선 [[decisions/2026-08-21-eso-controller-shared-singleton]] 설계를 라이브 클러스터에 실제로 적용. `kubectl`/`aws` CLI로 먼저 확인해보니 release의 ESO가 원래(2026-08-10, 오늘 땜빵 이전) 접미사 없는 이름(`team5-qket-eso-role`, ns/릴리즈명 `external-secrets`)으로 떠있었고, 이게 새 공유 설계가 쓰는 이름과 우연히 정확히 일치 — 덕분에 destroy 없이 상태 이전만으로 끝남:
+
+- `terraform state rm`(release) → `terraform import`(02_k8s-addon)로 `aws_iam_role.eso`/`helm_release.external_secrets`를 실제 객체 그대로 흡수(plan 결과 0 destroy)
+- prod가 실패한 첫 apply의 고아 역할(`team5-qket-eso-role-prod`, 아무 SA도 미참조 확인됨)은 `aws iam delete-role-policy`/`delete-role`로 직접 정리
+- release/prod `module.eso`를 targeted apply로 마무리 — release는 인라인 정책 이름 교체(1 destroy+1 create), prod는 SecretStore/ExternalSecret 3종 이 세션에서 처음 정상 생성
+- 마이그레이션 내내 `external-secrets` 컨트롤러 파드 RESTARTS 0 유지, 3개 root 전부 `terraform plan` "No changes" 확인

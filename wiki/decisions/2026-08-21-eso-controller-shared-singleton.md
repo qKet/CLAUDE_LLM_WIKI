@@ -92,14 +92,22 @@ root에 있었음)라 문제였던 것.
 - `modules/addons/eso`의 `helm`/`kubectl` provider 요구사항 중 `helm`은 이제 이 모듈이 안 써서
   `04_data/release`·`04_data/prod`의 `providers.tf`에서 제거함 — 혹시 이 root에 나중에 다른
   `helm_release`가 추가되면 그때 다시 넣어야 함.
-- `terraform validate`는 `02_k8s-addon`/`04_data/release`/`04_data/prod` 전부 통과 확인함.
-  다만 release는 이미 environment-접미사 이름(`team5-qket-eso-role-release` 등)으로 실제
-  IAM 역할/Helm 릴리즈가 살아있는 상태 — 이 설계를 실제로 `apply`할 때는 새 공유 역할
-  (`team5-qket-eso-role`)이 새로 생성되고 예전 접미사 붙은 리소스(`team5-qket-eso-role-release`,
-  `external-secrets-release` 네임스페이스의 Helm 릴리즈)는 고아로 남으므로, apply 전에
-  **수동으로 정리(예: `helm uninstall`, `terraform state rm` 또는 그냥 남겨두고 나중에 별도
-  destroy)가 필요함 — 아직 미착수.** prod는 한 번도 정상적으로 안착한 적이 없어서(이름 충돌로
-  실패했었음) 이 문제가 없음.
+- ✅ (완료, 2026-08-21) 실제로 `kubectl`/`aws` CLI로 라이브 상태를 먼저 확인해보니, release의
+  ESO는 애초에 (오늘 아침 땜빵 이전, 2026-08-10에) **접미사 없는** 이름(`team5-qket-eso-role`,
+  네임스페이스/Helm 릴리즈 `external-secrets`)으로 이미 떠있었음 — 새 공유 설계가 쓰는 이름과
+  우연히 완전히 같았음. 덕분에 destroy/재생성 없이 순수 상태 이전만으로 끝남:
+  - `terraform state rm`으로 release state에서 `aws_iam_role.eso`/`helm_release.external_secrets`만
+    떼어내고(실제 AWS/Helm 객체는 안 건드림), `terraform import`로 `02_k8s-addon`의
+    `module.eso_controller.aws_iam_role.this`/`helm_release.this`에 그대로 흡수 — `terraform plan`
+    확인 결과 `0 to destroy`(태그/`repository` 필드 같은 사소한 diff만 in-place 반영)
+  - prod가 실패한 첫 apply에서 남긴 고아 역할(`team5-qket-eso-role-prod`, 실제로 아무 SA도 참조 안 함을
+    `kubectl get sa -A` 로 확인)은 `terraform state rm` 후 `aws iam delete-role-policy`/`delete-role`로
+    직접 삭제
+  - release/prod 각 `module.eso`도 targeted apply(`-target=module.eso`)로 마무리 — release는 인라인
+    정책 이름만 `team5-qket-eso-secrets-read` → `team5-qket-eso-secrets-read-release`로 교체(1
+    destroy+1 create, 즉시 완료), prod는 SecretStore/ExternalSecret 3종을 이 세션에서 처음으로 정상
+    생성(`SecretSyncedError`로 한 번 떴다가 IAM 전파 지연 15초 후 전부 `SecretSynced`)
+  - 마이그레이션 내내 `external-secrets` 컨트롤러 파드 3개 전부 `RESTARTS 0` 유지 확인 — 무중단.
 
 ## 관련
 
