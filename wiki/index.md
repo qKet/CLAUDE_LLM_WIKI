@@ -78,7 +78,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[servicemonitor-actuator-port-mismatch]] — backend actuator 포트 분리(8081, backend#29) 이후 Prometheus ServiceMonitor가 예전 포트(8080+`/api`)를 계속 스크랩해서 히카리풀/에러율/응답시간 등 앱 레벨 메트릭이 전부 안 보이던 문제 — **해결됨**
 - [[queue-max-active-users-bottleneck]] — 대기열 `MAX_ACTIVE_USERS=10`이 2000명 규모 오픈런을 전혀 못 버텨서 아무도 대기열을 통과 못하던 문제, 150으로 상향 — **해결됨**(2026-08-20: DB 커넥션 여유가 늘어나서 재계산 필요성 논의, 보류)
 - [[hikaricp-pool-stale-sizing-after-rds-upgrade]] — RDS를 db.t3.micro→medium으로 올린 뒤 `dbPoolSize×maxReplicas` 계산을 재검토 안 해서 실제 한도(341)보다 훨씬 작은 120에서 인위적으로 막혀있던 문제, 2000명 e2e 테스트에서 HikariCP 타임아웃 68건으로 실측 확인 — 240으로 상향 — **해결됨**
-- [[backend-cold-start-cpu-contention-during-rollout]] — 새 backend 파드 여러 개가 한 노드에 몰려서 뜰 때 JVM 콜드스타트 CPU 경합으로 liveness/readiness probe가 실패하는 문제, KEDA 스케일업(자가치유)과 설정변경발(發) 전체 롤링배포(`HealthyHostCount`가 1로 붕괴, 실제 로그인 실패로 이어짐) 두 갈래로 재현 — 2026-08-21 prod에서도 재현된 뒤 `topologySpreadConstraints`(backend/frontend 둘 다) 실제 적용 완료
+- 🟡 [[backend-cold-start-cpu-contention-during-rollout]] — 새 backend 파드 여러 개가 한 노드에 몰려서 뜰 때 JVM 콜드스타트 CPU 경합으로 liveness/readiness probe가 실패하는 문제, KEDA 스케일업(자가치유)과 설정변경발(發) 전체 롤링배포(`HealthyHostCount`가 1로 붕괴, 실제 로그인 실패로 이어짐) 두 갈래로 재현 — 2026-08-21 prod에서도 재현된 뒤 `topologySpreadConstraints` 적용(`ScheduleAnyway`→`DoNotSchedule`까지), 근데 `DoNotSchedule`이 "몰림은 막지만 신규 노드 여러 개를 기다리느라 스케일업이 늦어져서 그동안 소수 파드가 과부하되는" 새 트레이드오프를 드러냄 — **최종 결론 미정, 다음 세션에서 이어감**
 - [[loadtest-script-response-envelope-gotchas]] — k6 부하테스트 스크립트가 `GlobalResponseAdvice`의 응답 래핑 규칙(Map은 안 감싸고 DTO/record/List는 `data`로 감쌈)을 몰라서 `queueToken`/`status`가 계속 undefined였던 문제, 좌석 조회 응답의 `roundId`가 항상 null인 것도 같이 발견 — **해결됨**
 - [[grafana-avg-response-time-rate-nan-artifact]] — "평균 응답시간" 패널이 트래픽 뜸한 엔드포인트(`/auth/login`)에서 `rate()` 나눗셈 불안정으로 20013ms 같은 터무니없는 값을 보여주던 문제, 요청률 하한 필터로 해결 — **해결됨**
 - [[crd-not-yet-installed-on-fresh-apply]] — 매일 밤 `02_k8s-addon`을 destroy했다가 아침에 처음부터 재적용할 때마다 3일 연속 재현된 CRD 순서 문제 2건(ServiceMonitor, SecretStore) — `kubernetes_manifest`/`kubectl_manifest`가 plan 시점에 CRD 존재를 요구하는 게 근본 원인. **2026-08-20 후속**: 둘 다 `helm_release` 기반으로 전환해서 ServiceMonitor는 완전히 해결(targeted apply 불필요), SecretStore는 cross-root(04_data ESO) 문제라 `module.eso` 선적용은 여전히 필요하나 실패 범위는 대폭 축소됨
@@ -86,11 +86,14 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[gateway-api-instance-target-type-clusterip-service]] — release+prod 완전 컷오버 중 발견: `TargetGroupConfiguration.targetType` 기본값(instance)이 ClusterIP 서비스(alloy-faro)에서 `Gateway`를 통째로 `Accepted: False`로 실패시킴 — `targetType: ip` 명시로 해결. 이어서 걸린 헬스체크 경로 문제(`/`→404, `/collect`→405)도 Grafana Alloy 표준 엔드포인트 `/-/ready`로 해결 — **해결됨**
 - 🔴 [[admin-interceptor-context-path-bypass]] — **치명적 보안 버그**: `AdminAccessInterceptor`가 `getRequestURI()`(context-path `/api` 포함)로 경로를 읽어서 `"/admin"` 접두어 매칭이 절대 안 됨 — 로그인 없이/일반 회원으로 관리자 API(카테고리/사용자/프로그램/메뉴/예약이력/공연관리) 전체 조회·등록·수정·삭제가 가능했던 상태. `getServletPath()`로 교체해서 코드 수정 완료, [qKet/backend#41](https://github.com/qKet/backend/pull/41)로 PR — **머지 대기 중, 배포 전까지는 라이브에 여전히 취약점 존재**
 - [[release-dev-mysql-max-connections-mismatch]] — `CD/helm/values-release.yaml`의 `backend.dbPoolSize(12)×maxReplicas(20)=240`이 release가 dev-datastore로 옮겨간 뒤 실제 dev-mysql의 `max_connections`(151, MySQL 기본값)를 초과한 채 방치돼 있던 걸 발견(사용자 직접 지적) — 실제 장애로 터지기 전에 발견. 커넥션 계산만 맞추는 선(maxReplicas 8)을 넘어, "release는 개발 서버니까 최대한 가볍게"라는 방침에 따라 backend/frontend 전부 `minReplicas 1 / maxReplicas 2`로 최종 재조정 — **해결됨**
+- [[admin-alb-malformed-cidr-fixed-response-500]] — `admin_allowed_cidrs`에 `/32` 빠진 IP 하나 때문에 ALB Controller가 `qket-gw-admin` Gateway의 보안그룹 갱신을 계속 실패, dev.jun979.click의 `/api`·`/` 라우팅이 fixed-response 500으로 대체됨 — 앱은 완전히 멀쩡했는데 인프라 레벨에서만 터진 사고, `/32` 추가로 해결 — **해결됨**
+- [[argocd-besteffort-and-bootstrap-node-capacity]] — 부트스트랩 노드(고정 1개) 하나가 ArgoCD 등 인프라 파드 34개를 혼자 떠받치며 CPU 92%까지 찍던 문제 — ArgoCD 컴포넌트 전부 BestEffort(requests 없음)였던 걸 Burstable로 전환 + 노드 1→2로 상향 — **해결됨**
 
 ## runbook/ — 반복 운영 절차
 - [[db-schema-change]] — 로컬 DB 스키마 변경 절차 2가지
 - [[terraform-apply-order]] — Terraform 최초 적용 절차 (infrastructure → k8s-addon → registry/data, 구 platform → workload)
 - [[daily-infrastructure-toggle]] — 매일 아침/저녁 `01_infrastructure`/`02_k8s-addon` 켜고 끄기 (`Infra/README.md`에 명령어 정리, `04_data`는 AWS 리소스는 안 건드리지만 K8s 오브젝트 재생성 위해 아침에 apply 한 번 더 필요)
+- [[loadtest-round-reset]] — 부하테스트 반복 실행 전 회차(round) 상태 초기화(Redis 대기열 삭제 + DB 좌석 AVAILABLE로 리셋) 절차, 진짜 고객 예매와 섞이지 않게 사전 확인하는 방법 포함
 
 ---
 

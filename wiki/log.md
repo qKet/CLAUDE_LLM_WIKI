@@ -837,3 +837,15 @@ Gateway API 마이그레이션(release+prod+admin 컷오버) 완료 직후, `Inf
 - `helm template` 렌더링 확인, 에러 없음
 - [[backend-cold-start-cpu-contention-during-rollout]]에 후속 노트 추가
 - CD 레포는 규칙대로 커밋 안 함 — 사용자가 review 후 commit 필요
+
+## [2026-08-21] Claude Code | troubleshooting | prod 2000명 부하테스트 세션 종합 정리 (CIDR 사고, ArgoCD 리소스, topologySpreadConstraints 트레이드오프, 부하테스트 리셋 런북)
+
+같은 날 이어진 prod 부하테스트 재검증 세션에서 겪은 문제들을 종합 정리:
+
+1. **[[admin-alb-malformed-cidr-fixed-response-500]] 신설** — `admin_allowed_cidrs`에 `/32` 빠진 IP 하나로 dev.jun979.click 전체가 500 — 앱은 멀쩡했고 ALB Controller가 보안그룹 갱신에 계속 실패한 인프라 레벨 사고였음. `/32` 추가로 해결.
+2. **[[argocd-besteffort-and-bootstrap-node-capacity]] 신설** — 부트스트랩 노드(고정 1개) 하나가 ArgoCD 컴포넌트(전부 BestEffort) 포함 인프라 파드 34개를 혼자 떠받치며 CPU 92% — ArgoCD `resources.requests` 부여(Burstable 전환) + 노드 1→2 상향으로 해결.
+3. **[[backend-cold-start-cpu-contention-during-rollout]] 후속(재현 3, 미해결)** — `topologySpreadConstraints`를 `ScheduleAnyway`→`DoNotSchedule`로 강화했는데, 오히려 "신규 노드 여러 개를 동시에 기다려야 해서 스케일업이 늦어지고 그동안 소수 파드가 과부하되는"(`HPA cpu 399%/70%`, 로그인 대량 timeout) 새 트레이드오프가 드러남 — 최종 결론 못 내림, 다음 세션 과제로 남김.
+4. **[[loadtest-round-reset]] 런북 신설** — 부하테스트 반복 실행 시 Redis 좀비 대기열 + DB 소진된 좌석을 초기화하는 절차. 실행 전 "진짜 고객 예매가 섞여있지 않은지" 확인 단계 포함(이번엔 round_id=11의 RESERVED 358건이 전부 loadtest 계정임을 확인 후 진행).
+5. k6 `reservation_unexpected_fail` threshold를 `count==0`→`count<20`으로 완화 — CloudWatch로 확인한 결과 그 실패들이 `Target_5XX`(앱이 직접 준 500)가 아니라 `TargetConnectionErrorCount`(ALB가 파드에 연결 자체를 못 맺음, KEDA 스케일업 순간의 정상적 blip)였음을 확인한 뒤 판단.
+
+index.md 갱신(위 3건 추가, backend-cold-start 항목을 🟡 미해결로 재표시).

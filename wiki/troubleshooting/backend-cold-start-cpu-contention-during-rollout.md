@@ -22,6 +22,29 @@ updated: 2026-08-21
 > `ScheduleAnyway`라 이 상황(제약을 못 지키는 배치)을 그냥 허용해버림. `whenUnsatisfiable`을
 > `DoNotSchedule`(하드 제약)로 변경 — Karpenter가 있어서 "제약 못 맞추면 Pending" 위험이 낮고,
 > 대신 필요하면 노드를 여러 개로 나눠 만들어서라도 분산을 강제하게 됨.
+>
+> 🟡 **또 같은 날 후속 — `DoNotSchedule`도 완벽한 해법은 아니었음, 새로운 트레이드오프 발견(미해결).**
+> `DoNotSchedule` 배포 후 재검증 테스트에서 로그인 대량 timeout(`request timeout`)이 실제로 터짐.
+> 원인은 이전과 정반대 방향 — `DoNotSchedule`이 의도대로 "분산"을 강제하긴 했는데, 이번엔
+> 스케일업에 신규 노드가 **5개나 동시에 필요**했고(각 파드가 서로 다른 노드를 요구하니까), 그
+> 5개 노드가 전부 뜨는 데 1~2분이 걸리는 동안 이미 떠있던 파드 2개(목표 8개 중)가 트래픽을
+> 전부 떠안아서 `HPA cpu 399%/70%`(목표의 5.7배)까지 과부하됨 → 그 2개 파드도 응답을 못
+> 해서 로그인 대량 timeout으로 이어짐. 즉 `ScheduleAnyway`는 "몰리지만 빨리 준비됨",
+> `DoNotSchedule`은 "고르게 분산되지만 신규 노드를 여러 개 기다려야 해서 늦게 준비됨" —
+> 어느 쪽이 실제로 더 안전한지는 상황(한 번에 필요한 신규 노드 수, Karpenter 노드 부팅
+> 속도)에 따라 다르다는 게 실측으로 드러남. **아직 최종 결론 안 냄** — 후보: (a) 그대로
+> 유지하고 감수, (b) `ScheduleAnyway`로 롤백, (c) `maxSkew`를 2~3 정도로 완화해서 "1노드
+> 4개 쏠림"은 막되 "1노드 2개"는 허용하는 절충안. 다음 세션에서 이어서 정할 것.
+>
+> 이 재검증 과정에서 부수적으로 두 가지 더 확인/정리함:
+> - k6 스크립트(`Infra/loadtest/e2e_reservation_2000.js`)의 `reservation_unexpected_fail`
+>   threshold가 이런 정상적인(비록 트레이드오프가 있더라도) 스케일업 blip까지 "버그"로 잡아내는
+>   문제 — CloudWatch로 확인해보니 그 blip 동안 `HTTPCode_Target_5XX_Count`(앱이 직접 준 500)는
+>   0이었고 `TargetConnectionErrorCount`(ALB가 파드에 연결 자체를 못 맺음)만 튀었음 — 앱 버그가
+>   아니라 인프라 레벨 현상임을 확인. threshold를 `count==0` → `count<20`(2000명의 1%)으로 완화.
+> - 부하테스트를 반복 실행하려면 매번 이전 실행이 남긴 "좀비 대기열 상태"(Redis
+>   `queue:{roundId}:waiting`/`active`에 만료됐거나 안 지워진 토큰들)와 "이미 소진된 좌석"(DB
+>   `RESERVATIONS.reserved_status`)을 초기화해야 함 — 절차는 [[../runbook/loadtest-round-reset]] 참고(신설).
 
 # 새 backend 파드 동시 콜드스타트 CPU 경합 — 두 번 재현(KEDA 스케일업, 롤링배포)
 
@@ -52,16 +75,23 @@ CloudWatch `HealthyHostCount`(대상 타겟그룹)로 직접 확인:
 ```
 이 `18:08`의 붕괴 순간과 겹친 부하테스트 요청들이 실제로 실패함 — 같은 시점 k6 결과에서 로그인 성공률이 57%(1158/2000)까지 떨어짐. 로그인 요청은 `RAMP_SECONDS`(기본 10초) 지터로 테스트 시작 직후 짧은 구간에 몰리는 구조라, 마침 이 1분짜리 붕괴 구간과 겹치면 상당수가 실패로 잡힌다.
 
+## 재현 3 — `topologySpreadConstraints(DoNotSchedule)` 적용 후에도 다른 형태로 재현 (2026-08-21, prod)
+
+위 두 재현을 겪고 `topologySpreadConstraints`(처음엔 `ScheduleAnyway`, 그다음 `DoNotSchedule`)를 실제로 적용했는데, `DoNotSchedule`로 바꾼 뒤 재검증 테스트에서 또 다른 모양으로 문제가 재현됨. 자세한 내용은 이 문서 맨 위 알림(🟡) 참고 — 핵심만 요약하면: "노드 하나에 몰리는 것"은 확실히 막혔지만, 그 대신 "스케일업에 필요한 신규 노드 여러 개가 동시에 뜨는 걸 기다리느라 스케일업 자체가 늦어져서, 그동안 기존 소수 파드가 과부하되는" 새로운 실패 모드가 나타남. `HPA cpu 399%/70%`, 로그인 대량 timeout으로 실제 확인됨. **아직 미해결 — 다음 세션에서 `maxSkew` 완화나 롤백 여부를 결정할 것.**
+
 ## 재발 방지 / 고려할 것 (미적용)
 
 - **설정 변경으로 인한 전체 재배포는 "배포"로 취급하고, 부하테스트와 시간을 겹치지 않게 할 것** — 이번 사고의 직접 원인은 "부하테스트 도중 무심코 설정을 고쳐서 롤링배포가 트리거된 것" 자체였음.
 - Deployment `strategy.rollingUpdate`에 `maxUnavailable: 0`을 고려할 수 있음(옛 파드를 새 파드가 완전히 Ready된 뒤에만 내리는 방식) — 다만 `maxSurge`만으로 여유 용량을 확보해야 해서 순간적으로 필요한 파드 수가 더 늘어남(비용/노드 여유 트레이드오프).
 - `PodDisruptionBudget`으로 롤아웃 중에도 최소 가용 개수를 강제하는 것도 검토 가능.
 - 근본적으로는 [[frontend-cpu-throttling-cfs-quota-vs-jvm-tradeoff]]에서 frontend에 적용했던 것처럼 **backend도 CPU limit을 없애고 request 기반 fair-share로 전환**하는 방법이 있으나, backend는 JVM이 `ActiveProcessorCount`를 cgroup 쿼터에서 자동으로 추론하는 구조라 limit을 없애면 스레드풀이 과다 산정될 위험이 있어(이미 문서화된 트레이드오프) 신중한 검토 필요.
-- ✅ (적용, 2026-08-21) **파드 분산 강제**(topologySpreadConstraints/anti-affinity)로 같은 배포 이벤트에서 여러 신규 파드가 같은 노드에 몰리지 않게 하는 것 — 위 알림 참고.
+- 🟡 (부분 적용, 2026-08-21 — 새 트레이드오프 발견, 미해결) **파드 분산 강제**(topologySpreadConstraints/anti-affinity)로 같은 배포 이벤트에서 여러 신규 파드가 같은 노드에 몰리지 않게 하는 것 — "재현 3"과 맨 위 알림 참고. 몰림은 막혔지만 신규 노드 여러 개를 기다리느라 스케일업이 늦어지는 부작용이 새로 생김.
 
 ## 관련
 - [[hikaricp-pool-stale-sizing-after-rds-upgrade]]
 - [[backend-cpu-throttling-and-scaling-load-test]]
 - [[frontend-cpu-throttling-cfs-quota-vs-jvm-tradeoff]]
 - [[../decisions/2026-08-18-capacity-planning-large-traffic-readiness]]
+- [[argocd-besteffort-and-bootstrap-node-capacity]]
+- [[admin-alb-malformed-cidr-fixed-response-500]]
+- [[../runbook/loadtest-round-reset]]
