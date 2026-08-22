@@ -62,6 +62,7 @@ Qket 프로젝트 팀 위키의 전체 페이지 목록. 새 페이지를 추가
 - [[eks-destroy-layer-separation]] — EKS destroy 시 K8s addon 정리 실패 종합 정리 + Layer 1(infrastructure)/Layer 2(k8s-addon) 분리 해법 (구현 완료)
 - [[cd-helm-chart-deploy-review]] — CD Helm 차트 실동작 리뷰에서 찾은 문제 4가지(frontend 백엔드 주소 누락, ArgoCD path 오류, frontend Dockerfile 중복 빌드, backend 필수 env var 누락) — OAuth/Toss 시크릿은 이후 해결됨([[decisions/2026-08-11-external-api-secrets-manager]]), 문제 1의 `rewrites()` 방식은 이후 폐기됨([[decisions/2026-08-11-frontend-api-routing-alb-not-rewrites]])
 - [[destroy-order-incident-and-webhook-orphans]] — 실제로 destroy 순서를 어겨서 겪은 사고: IAM 손상 복구, ALB/TG/SG 고아 리소스 정리, ALB Controller·ESO 둘 다에서 재현된 "죽은 컨트롤러의 admission webhook이 finalizer를 영구히 막는" 문제
+- [[ebs-csi-addon-destroyed-before-dev-datastore-pvc]] — 같은 root(`02_k8s-addon`) 안에서 `aws_eks_addon.ebs_csi`와 `module.dev_datastore` 사이에 Terraform이 아는 의존관계가 없어서, destroy 순서가 우연히 CSI addon 먼저로 정해져 dev-mysql/redis PVC/PV가 영원히 `Still destroying...`으로 멈춤 — finalizer 강제 제거(Retain 정책이라 EBS 볼륨 안전)로 즉시 해결 + `depends_on` 추가로 재발 방지 — **해결됨**
 - [[alb-ingressgroup-orphan-on-rename]] — ALB Controller가 Ingress의 `group.name`을 바꿔도 옛 IngressGroup(ALB/TG)을 자동으로 안 치움
 - [[backend-ci-missing-service-containers]] — backend CI에 MySQL/Redis 서비스 컨테이너가 없어서 `contextLoads` 테스트 실패, GitHub Actions `services:`로 해결
 - [[payment-eso-secret-staleness]] — Toss 결제 400 에러, 원인은 페어링 불일치가 아니라 ESO 1시간 재동기화 주기 동안 K8s Secret에 남아있던 stale한 값

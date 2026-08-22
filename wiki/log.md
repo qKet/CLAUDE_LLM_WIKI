@@ -849,3 +849,11 @@ Gateway API 마이그레이션(release+prod+admin 컷오버) 완료 직후, `Inf
 5. k6 `reservation_unexpected_fail` threshold를 `count==0`→`count<20`으로 완화 — CloudWatch로 확인한 결과 그 실패들이 `Target_5XX`(앱이 직접 준 500)가 아니라 `TargetConnectionErrorCount`(ALB가 파드에 연결 자체를 못 맺음, KEDA 스케일업 순간의 정상적 blip)였음을 확인한 뒤 판단.
 
 index.md 갱신(위 3건 추가, backend-cold-start 항목을 🟡 미해결로 재표시).
+
+## [2026-08-22] Claude Code | troubleshooting | 밤 destroy 중 EBS CSI addon이 dev-datastore PVC보다 먼저 지워져 무한 대기 + depends_on 추가
+
+매일 밤 `02_k8s-addon` destroy 중 `dev-mysql-data`/`dev-redis` PVC/PV가 `Still destroying...`를 15분 넘게 반복 — 사용자가 "무한루프냐"고 문의. `aws eks list-addons`로 확인해보니 EBS CSI addon이 이미 완전히 삭제된 상태였고, PVC/PV의 finalizer(`external-attacher/ebs-csi-aws-com` 등)를 처리해줄 컨트롤러 자체가 사라져서 영원히 안 풀리는 상황이었음.
+
+- **즉시 조치**: PVC/PV/VolumeAttachment의 finalizer를 `kubectl patch --type=merge`로 강제 제거(사용자 승인 받고 진행 — 첫 시도는 권한 분류기에 막혀서 승인 요청함). `Retain` 정책이라 실제 EBS 볼륨(03_registry 소유)은 전혀 안 건드림 — 이후 `terraform destroy`가 자동으로 이어서 진행됨. 오너 없는 잔여 VolumeAttachment 1개는 deletionTimestamp가 없어서 patch 대신 직접 delete, 오너 없는 `dev-mysql-0` 파드(Completed 상태로 방치)도 정리.
+- **근본 원인 수정**: `02_k8s-addon/main.tf`의 `module.dev_datastore`에 `depends_on = [..., aws_eks_addon.ebs_csi]` 추가 — dev_datastore의 PV가 CSI 드라이버를 문자열로만 참조해서 Terraform 그래프에 의존관계가 전혀 없었던 게 원인. depends_on을 걸면 destroy가 자동으로 역순(dev_datastore 먼저, ebs_csi 나중) 보장됨.
+- [[troubleshooting/ebs-csi-addon-destroyed-before-dev-datastore-pvc]] 신설, index.md 갱신.
