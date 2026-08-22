@@ -857,3 +857,11 @@ index.md 갱신(위 3건 추가, backend-cold-start 항목을 🟡 미해결로 
 - **즉시 조치**: PVC/PV/VolumeAttachment의 finalizer를 `kubectl patch --type=merge`로 강제 제거(사용자 승인 받고 진행 — 첫 시도는 권한 분류기에 막혀서 승인 요청함). `Retain` 정책이라 실제 EBS 볼륨(03_registry 소유)은 전혀 안 건드림 — 이후 `terraform destroy`가 자동으로 이어서 진행됨. 오너 없는 잔여 VolumeAttachment 1개는 deletionTimestamp가 없어서 patch 대신 직접 delete, 오너 없는 `dev-mysql-0` 파드(Completed 상태로 방치)도 정리.
 - **근본 원인 수정**: `02_k8s-addon/main.tf`의 `module.dev_datastore`에 `depends_on = [..., aws_eks_addon.ebs_csi]` 추가 — dev_datastore의 PV가 CSI 드라이버를 문자열로만 참조해서 Terraform 그래프에 의존관계가 전혀 없었던 게 원인. depends_on을 걸면 destroy가 자동으로 역순(dev_datastore 먼저, ebs_csi 나중) 보장됨.
 - [[troubleshooting/ebs-csi-addon-destroyed-before-dev-datastore-pvc]] 신설, index.md 갱신.
+
+## [2026-08-22] Claude Code | troubleshooting | KEDA도 같은 클래스의 destroy-order 버그로 namespace가 안 지워짐 + depends_on 추가
+
+방금 고친 EBS CSI 건과 완전히 같은 패턴이 같은 밤 destroy에서 KEDA로도 재현됨. `kubernetes_namespace.qket["release"/"prod"]`가 `Terminating`에서 안 넘어가서 `kubectl get namespace -o json`의 `status.conditions`로 확인해보니 `scaledobjects.keda.sh has 2 resource instances`(네임스페이스당) + `finalizer.keda.sh` 미해제. `module.keda`가 네임스페이스보다 먼저 destroy되면서 ScaledObject(ArgoCD가 만든 CR)의 finalizer를 처리해줄 KEDA 오퍼레이터가 이미 사라진 상태였음(`helm list -A`에 keda 릴리즈 자체가 없음).
+
+- 4개 ScaledObject(release/prod × backend/frontend) finalizer 강제 제거로 즉시 해결. qket-release엔 leftover `dev-mysql-0` 파드(StatefulSet은 이미 삭제됐는데 파드만 종료 안 끝나고 남음)도 하나 더 걸려있어서 `--grace-period=0 --force`로 같이 정리.
+- 근본 수정: `kubernetes_namespace.qket`에 `depends_on = [module.keda, module.eso_controller]` 추가(`terraform validate` 통과) — `module.eso_controller`도 04_data의 SecretStore/ExternalSecret이 같은 취약점을 가질 수 있어서 선제적으로 같이 묶음.
+- [[troubleshooting/ebs-csi-addon-destroyed-before-dev-datastore-pvc]]를 일반화된 제목/구조로 재정리(사례 1: EBS CSI, 사례 2: KEDA, 일반화된 재발방지 체크리스트 추가). index.md 갱신.
