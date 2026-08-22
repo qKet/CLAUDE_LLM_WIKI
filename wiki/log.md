@@ -865,3 +865,16 @@ index.md 갱신(위 3건 추가, backend-cold-start 항목을 🟡 미해결로 
 - 4개 ScaledObject(release/prod × backend/frontend) finalizer 강제 제거로 즉시 해결. qket-release엔 leftover `dev-mysql-0` 파드(StatefulSet은 이미 삭제됐는데 파드만 종료 안 끝나고 남음)도 하나 더 걸려있어서 `--grace-period=0 --force`로 같이 정리.
 - 근본 수정: `kubernetes_namespace.qket`에 `depends_on = [module.keda, module.eso_controller]` 추가(`terraform validate` 통과) — `module.eso_controller`도 04_data의 SecretStore/ExternalSecret이 같은 취약점을 가질 수 있어서 선제적으로 같이 묶음.
 - [[troubleshooting/ebs-csi-addon-destroyed-before-dev-datastore-pvc]]를 일반화된 제목/구조로 재정리(사례 1: EBS CSI, 사례 2: KEDA, 일반화된 재발방지 체크리스트 추가). index.md 갱신.
+
+## [2026-08-22] Claude Code | troubleshooting | GatewayClass-ALB Controller destroy 순서 구조적 모순 해결 + stray 파일 제거
+
+같은 밤 destroy에서 세 번째로 같은 클래스의 문제 재현: 이번엔 `module.gateway_api_crds.helm_release.gateway_api_crds`가 `Still destroying...`로 멈춤. 원인은 GatewayClass(ALB Controller 자신의 finalizer `gateway.k8s.aws/gatewayclass`를 가짐)가 CRD와 같은 Helm 차트에 묶여있어서 — "생성은 CRD/GatewayClass가 컨트롤러보다 먼저"(ALB Controller 부팅 시 CRD 존재 확인) vs "파괴는 GatewayClass가 컨트롤러보다 먼저"(finalizer 처리)라는 정반대 순서 요구가 한 리소스에 동시에 걸려있어서 `depends_on` 하나로 해결 불가능했음.
+
+사용자가 "GatewayClass를 01_infrastructure에서 만들면 되냐"고 제안했으나, 이미 확립된 destroy 순서(02_k8s-addon을 01_infrastructure보다 먼저 destroy)상 오히려 매일 밤 100% 확정적으로 재현되게 만드는 역효과라고 설명하고, 대신 **같은 root(02_k8s-addon) 안에서 GatewayClass만 별도 리소스로 분리**하는 방향으로 정리:
+
+- `modules/addons/gateway-api/crds`에서 `gatewayclass.yaml` 템플릿 제거, `main.tf`/주석 갱신
+- `02_k8s-addon/main.tf`에 `kubectl_manifest.gateway_class` 신설, `depends_on = [module.alb_controller]`(CRD 쪽과 반대 방향)
+- `module.gateway_api_app`/`gateway_api_admin`(GatewayClass를 참조하는 Gateway를 만드는 쪽)의 `depends_on`에 `kubectl_manifest.gateway_class` 추가
+- 부수 발견: 이 크ds 차트 안에 이전 세션에서 "잘못 놓인 파일 같다"고만 확인하고 안 지웠던 untracked `gateway.yaml`(pilot 모듈 파일이 실수로 복사됨)이 `helm template` 렌더링 자체를 깨뜨리고 있던 걸 재확인 — 삭제해서 해결
+- `terraform validate` 통과, `helm template`로 CRD 차트 렌더링 정상 확인(GatewayClass 없이 ValidatingAdmissionPolicy만 남음). 클러스터가 이미 야간 destroy로 내려가 있어서 라이브 적용/state 이전은 다음 아침 apply 때 자연스럽게 반영됨(현재 살아있는 리소스가 없어서 state mv 불필요).
+- [[troubleshooting/gatewayclass-alb-controller-destroy-order]] 신설, index.md 갱신.
